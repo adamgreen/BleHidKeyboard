@@ -1,0 +1,2 @@
+#! /usr/bin/env bash
+JLinkGDBServer -device NRF51422 -endian little -if SWD -speed 12000 -localhostonly

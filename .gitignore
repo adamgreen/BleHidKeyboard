@@ -1,0 +1,17 @@
+.DS_Store
+*.bin
+*.disasm
+*.elf
+*.hex
+*.map
+*.o
+*.d
+*.a
+.gdbinit
+.gdb_history
+
+*.zip
+/firmware/config/*.h
+/sdk/
+/tools/mergehex
+/tools/nrfjprog
