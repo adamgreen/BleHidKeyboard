@@ -54,6 +54,7 @@
 #include <nrf_drv_gpiote.h>
 #include <app_uart.h>
 #include "HidKeyboard.h"
+#include "MCP23018.h"
 #include "ScanCodes.h"
 #include "nrf_drv_timer.h"
 
@@ -348,6 +349,10 @@ static void initTimer1ForKeyboardTimeouts(void);
 static void enterLowPowerModeAndWakeOnEvent(void);
 
 
+// UNDONE:
+static MCP23018 mcp23018_1;
+
+
 
 int main(void)
 {
@@ -371,7 +376,49 @@ int main(void)
     startRtcTimers();
     errorCode = ble_advertising_start(BLE_ADV_MODE_FAST);
     APP_ERROR_CHECK(errorCode);
-    initKeyboard();
+
+    // UNDONE: Just hardcoding here for initial I/O expander testing.
+    #define KEYBOARD_SCL_PIN                1
+    #define KEYBOARD_SDA_PIN                2
+    #define KEYBOARD_MCP23018_1_I2C_ADDRESS 0x20
+    
+    errorCode = i2cInit(KEYBOARD_SCL_PIN, KEYBOARD_SDA_PIN);
+    APP_ERROR_CHECK(errorCode);
+
+    errorCode = mcp23018Init(&mcp23018_1, KEYBOARD_MCP23018_1_I2C_ADDRESS);
+    APP_ERROR_CHECK(errorCode);
+
+    bool interruptPinMirroringDisabled = false;
+    bool interruptDrainOutputDisabled = false;
+    bool interruptActiveLow = false;
+    bool interruptClearOnGPIORead = false;
+    errorCode = mcp23018SetIoConfiguration(&mcp23018_1, 
+                                           interruptPinMirroringDisabled,
+                                           interruptDrainOutputDisabled,
+                                           interruptActiveLow,
+                                           interruptClearOnGPIORead);
+    APP_ERROR_CHECK(errorCode);
+
+    // Set all outputs to 1 before setting direction register.
+    errorCode = mcp23018AsyncSetGpio(&mcp23018_1, ~0x00, ~0x03);
+    APP_ERROR_CHECK(errorCode);
+    while (!mcp23018HasAsyncSetCompleted(&mcp23018_1))
+    {
+    }
+
+    // PortA-0 pin is output and PortB-0 to PortB-1 are inputs. 
+    // Default all other pins to be outputs to conserve power.
+    errorCode =  mcp23018SetIoDirections(&mcp23018_1, 0x00, 0x03);
+    APP_ERROR_CHECK(errorCode);
+
+    // Enable pull-up on the PortB input pins.
+    errorCode = mcp23018SetGpioPullUps(&mcp23018_1, 0x00, 0x03);
+    APP_ERROR_CHECK(errorCode);
+
+    // UNDONE: Strobe the first column.
+//    errorCode = mcp23018AsyncSetGpio(&mcp23018_1, 0x00, 0x00);
+//    APP_ERROR_CHECK(errorCode);
+
 
     // Sleep until a new event occurs and then check the scheduler to execute any queued operations.
     while (1)
@@ -379,6 +426,9 @@ int main(void)
         app_sched_execute();
         enterLowPowerModeAndWakeOnEvent();
     }
+
+    // UNDONE: Get rid of this code completely in the future.
+    initKeyboard();
 }
 
 static void initUart(void)
@@ -435,6 +485,49 @@ static void initRtcTimers(void)
 static void handleBatteryLevelTimerEvent(void* pContext)
 {
     updateBatteryLevel();
+
+    // UNDONE: Just hacking in here for now.
+    static bool     firstScan = true;
+    static uint32_t scanStep = 0;
+    static uint8_t  portA = 0xFF;
+    static uint8_t  portB = 0xFF;
+    uint32_t        errorCode = 0;
+
+    if (!firstScan)
+    {
+        // Make sure that previous async command completed.
+        ASSERT ( mcp23018HasAsyncSetCompleted(&mcp23018_1) );
+
+        // On even steps, the previous step's read should have completed so print it out.
+        if ((scanStep & 1) == 0)
+        {
+            printf("%u-%u\n", (scanStep == 2) ? 0 : 1, portB ^ 0x03);
+        }
+    }
+    firstScan = false;
+    
+    switch (scanStep)
+    {
+    case 0:
+        // Pull first column low.
+        errorCode = mcp23018AsyncSetGpio(&mcp23018_1, 0xFE, 0x00);
+        APP_ERROR_CHECK(errorCode);
+        break;
+    case 1:
+    case 3:
+        // Read the rows.
+        errorCode = mcp23018AsyncGetGpio(&mcp23018_1, &portA, &portB);
+        APP_ERROR_CHECK(errorCode);
+        break;
+    case 2:
+        // Pull second column low.
+        errorCode = mcp23018AsyncSetGpio(&mcp23018_1, 0xFD, 0x00);
+        APP_ERROR_CHECK(errorCode);
+        break;
+    default:
+        ASSERT ( false );
+    }
+    scanStep = (scanStep + 1) % 4;
 }
 
 static void updateBatteryLevel(void)
