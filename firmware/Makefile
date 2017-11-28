@@ -59,6 +59,7 @@ $(abspath $(NRF51_SDK_PATH)/examples/bsp/bsp.c) \
 $(abspath $(NRF51_SDK_PATH)/examples/bsp/bsp_btn_ble.c) \
 $(abspath main.c) \
 $(abspath MCP23018.c) \
+$(abspath KeyboardMatrix.c) \
 $(abspath $(NRF51_SDK_PATH)/components/ble/common/ble_advdata.c) \
 $(abspath $(NRF51_SDK_PATH)/components/ble/ble_advertising/ble_advertising.c) \
 $(abspath $(NRF51_SDK_PATH)/components/ble/ble_services/ble_bas/ble_bas.c) \
