@@ -295,8 +295,10 @@ static void gpioReadCompletedCallback(ret_code_t result, void* pvContext)
 
     ASSERT ( pThis );
 
-    *pThis->pPortARead = pThis->gpioRead[0];
-    *pThis->pPortBRead = pThis->gpioRead[1];
+    if (pThis->pPortARead)
+        *pThis->pPortARead = pThis->gpioRead[0];
+    if (pThis->pPortBRead)
+        *pThis->pPortBRead = pThis->gpioRead[1];
     pThis->readInProgress = false;
 }
 
