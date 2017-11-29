@@ -17,13 +17,6 @@
     * Remapping of alpha keys so that they can be arranged in ABC order instead of the usual QWERTY.
 
     The BLE code in this project originated from Nordic Semiconductor's BLE HID Keyboard Sample.
-
-    How to connect to AT keyboard?
-    5-pin DIN Connector     nRF51
-    1 - Clock               Pin 1
-    2 - Data                Pin 2
-    4 - Ground              Gnd
-    5 - Vcc                 +5V
 */
 #include <stdint.h>
 #include <string.h>
@@ -53,25 +46,19 @@
 #include <app_trace.h>
 #include <nrf_drv_gpiote.h>
 #include <app_uart.h>
-#include "HidKeyboard.h"
 #include "KeyboardMatrix.h"
-#include "ScanCodes.h"
 #include "MCP23018.h"
 #include "nrf_drv_timer.h"
 
 
+// nRF51 pins connected to the I2C pins on the MCP23018 I/O expanders used with the keyboard matrix.
+#define KEYBOARD_SCL_PIN                1
+#define KEYBOARD_SDA_PIN                2
 
-// The AT keyboard is connected to the nRF51 via two pins (data and clock).
-#define KEYBOARD_CLOCK_PIN  1
-#define KEYBOARD_DATA_PIN   2
-
-
-// Debug and Configuration Settings for Keyboard Firmware.
-// Set to non-zero value to dump raw scan codes to the terminal instead of final cooked values.
-#define DEBUG_SHOW_RAW_SCAN_CODE    0
-
-// Set to non-zero value to dump cooked ASCII text values to terminal.
-#define DEBUG_SHOW_ASCII_TEXT       0
+// There are two MCP23018 16-bit I/O expanders used to connect to all of the columns and rows of the keyboard matrix.
+// The following defines provide the I2C addresss of these two MCP23018 expanders.
+#define KEYBOARD_MCP23018_1_I2C_ADDRESS 0x20
+#define KEYBOARD_MCP23018_2_I2C_ADDRESS 0x27
 
 // Set to non-zero value to dump BLE HID reports.
 #define DEBUG_SHOW_HID_REPORT       1
@@ -101,13 +88,8 @@
 #define INPUT_REPORT_KEYS_MAX_LEN        sizeof(HidKeyboardInputReport)
 
 
-// Configure logging and keyboard type (QWERTY/ABC) macros based on previously defined macro settings.
-#if DEBUG_SHOW_RAW_SCAN_CODE
-    #define PRINTF_RAW(...) printf(__VA_ARGS__)
-#else
-    #define PRINTF_RAW(...) (void)0
-#endif
-
+// UNDONE: Need to update for new keyboard matrix code.
+// Configure keyboard type (QWERTY/ABC) macros based on previously defined macro settings.
 #if KEYBOARD_IS_SPECIAL_ABC
     #define ALPHA_SCAN_CODES g_scanCodesABC
     #define ALPHA_HID_CODES  g_scanCodesToHidABC
@@ -201,8 +183,7 @@
 #define DEAD_BEEF                        0xDEADBEEF                                     
 
 // Application Scheduler Settings.
-#define SCHED_MAX_EVENT_DATA_SIZE        (MAX(MAX(APP_TIMER_SCHED_EVT_SIZE,BLE_STACK_HANDLER_SCHED_EVT_SIZE),\
-                                             sizeof(HidKeyboardInputReport)))
+#define SCHED_MAX_EVENT_DATA_SIZE        (MAX(APP_TIMER_SCHED_EVT_SIZE,BLE_STACK_HANDLER_SCHED_EVT_SIZE))
 #define SCHED_QUEUE_SIZE                 10                                  
 
 
@@ -218,30 +199,9 @@ typedef enum
     BLE_SLEEP,                // Go to system-off.
 } ble_advertising_mode_t;
 
-// The following structure keeps track of state as it parses the potentially multi-byte scan code data being received 
-// from the AT or PS/2 style keyboard.
-typedef struct ScanState
-{
-    const char* const * pScanTable;
-    const uint8_t*      pScanToHidTable;
-    int32_t             expectedScanCodeBytes;
-    uint8_t             lastScanCode;
-    bool                isBreak;
-} ScanState;
-
-typedef enum KeyboardMode
-{
-    RECEIVING,
-    TRANSMITTING
-} KeyboardMode;
-
-
 
 // Battery timer.
 APP_TIMER_DEF(g_batteryTimerId);                                                      
-
-// Use High Speed Timer1 used for the AT keyboard protocol.
-static const nrf_drv_timer_t        g_timer1 = NRF_DRV_TIMER_INSTANCE(1);
 
 // Structure used to identify the HID service.
 static ble_hids_t                   g_hids;
@@ -264,36 +224,6 @@ static dm_handle_t                  g_bondedPeerHandle;
 
 // Advertise that this is a standard BLE HID device.
 static ble_uuid_t                   g_advertisingUuids[] = {{BLE_UUID_HUMAN_INTERFACE_DEVICE_SERVICE, BLE_UUID_TYPE_BLE}};
-
-static volatile KeyboardMode        g_keyboardMode = RECEIVING;
-
-// Globals used for receiving keystrokes from AT keyboard.
-static volatile uint32_t            g_keyboardReceiveBitCount = 0;
-static volatile uint16_t            g_keyboardReceivedBits = 0;
-static volatile ScanState           g_keyboardReceiveScanState = { ALPHA_SCAN_CODES, ALPHA_HID_CODES, '\0', false };
-
-// Globals used for transmitting commands (such as LED setting) to AT keyboard.
-static volatile uint8_t             g_keyboardTransmitCommandBuffer[2];
-static volatile uint8_t             g_keyboardTransmitCommandLength = 0;
-static volatile uint8_t             g_keyboardTransmitCommandByteIndex = 0;
-static volatile uint32_t            g_keyboardTransmitBitCount = 0;
-
-// Globals used by both receiving and transmitting code.
-static volatile uint32_t            g_keyboardParity = 0;
-static volatile bool                g_keyboardRequestingResend = false;
-
-// Globals used to track timeouts for keyboard handling code in keyboardTimerHandler().
-// These counters are counted down from positive values until they hit 0.
-// At 0 they run timer specific code.
-// When set to -1 then these timeouts are inactive and keyboardTimerHandler() can ignore them.
-static volatile int32_t             g_keyboardBitTimeout = -1;
-static volatile int32_t             g_keyboardHoldClockLowTimeout = -1;
-
-// Contains the contents of the most recent input HID report sent to the PC.
-// It tracks the current keys and modifiers that are known to be depressed based on previous make codes.
-// Future break codes will clear values/bits in this report.
-static HidKeyboardInputReport       g_keyboardInputReport;
-
 
 
 // Forward function declarations.
@@ -331,23 +261,7 @@ static void initSensorSimulator(void);
 static void initConnectionParams(void);
 static void handleConnectionParamsError(uint32_t errorCode);
 static void startRtcTimers(void);
-static void initKeyboard(void);
-static void initGpioForKeyboardSignals(void);
-static void keyboardClockFallingEdgeHandler(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action);
-static void keyboardReceiveBit(void);
-static void handleKeyboardReceiveError(void);
-static void askKeyboardToResendLastByte(void);
-static void keyboardSendCommand(const uint8_t* pCommand, size_t commandLength);
-static void startKeyboardByteTransmit(void);
-static void initReceiveScanState();
-static void startKeyboardByteTransmit(void);
-static void updateKeyboardInputReport(HidKeyboardUsageValues key, bool isBreak);
-static void sendInputReportHandler(void* pEventData, uint16_t eventSize);
-static void keyboardTransmitBit(void);
-static inline void setPinDirectionToOutput(uint32_t pin);
-static inline void setPinDirectionToInput(uint32_t pin);
-static void initTimer1ForKeyboardTimeouts(void);
-static void sendInputReportHandler2(HidKeyboardInputReport* pReportToSend, void* pvContext);
+static void sendInputReportHandler(HidKeyboardInputReport* pReportToSend, void* pvContext);
 static void enterLowPowerModeAndWakeOnEvent(void);
 
 
@@ -375,18 +289,12 @@ int main(void)
     errorCode = ble_advertising_start(BLE_ADV_MODE_FAST);
     APP_ERROR_CHECK(errorCode);
 
-    // UNDONE: Just hardcoding here for initial I/O expander testing.
-    #define KEYBOARD_SCL_PIN                1
-    #define KEYBOARD_SDA_PIN                2
-    #define KEYBOARD_MCP23018_1_I2C_ADDRESS 0x20
-    #define KEYBOARD_MCP23018_2_I2C_ADDRESS 0x27
-
     KeyboardMatrix keyboardMatrix;
     errorCode = kbmatrixInit(&keyboardMatrix, 
                              KEYBOARD_MCP23018_1_I2C_ADDRESS, KEYBOARD_MCP23018_2_I2C_ADDRESS,
                              KEYBOARD_SCL_PIN, KEYBOARD_SDA_PIN,
                              APP_TIMER_PRESCALER,
-                             sendInputReportHandler2, NULL);
+                             sendInputReportHandler, NULL);
 
     // Sleep until a new event occurs and then check the scheduler to execute any queued operations.
     while (1)
@@ -394,9 +302,6 @@ int main(void)
         app_sched_execute();
         enterLowPowerModeAndWakeOnEvent();
     }
-
-    // UNDONE: Get rid of this code completely in the future.
-    initKeyboard();
 }
 
 static void initUart(void)
@@ -1097,6 +1002,8 @@ static void handleHidOutputReportWrite(ble_hids_evt_t *p_evt)
 
 static void updateKeyboardLeds(uint8_t hidLedBitmask)
 {
+    // UNDONE: Need to light LEDs for this instead.
+#ifdef UNDONE
     uint8_t ledCommand[] = { 0xED, 0x00 };
 
     if (hidLedBitmask & HID_OUTPUT_REPORT_LED_NUM_LOCK)
@@ -1113,6 +1020,7 @@ static void updateKeyboardLeds(uint8_t hidLedBitmask)
     }
 
     keyboardSendCommand(ledCommand, sizeof(ledCommand));
+#endif // UNDONE
 }
 
 static void handleServiceError(uint32_t errorCode)
@@ -1164,480 +1072,7 @@ static void startRtcTimers(void)
     APP_ERROR_CHECK(errorCode);
 }
 
-static void initKeyboard(void)
-{
-    initGpioForKeyboardSignals();
-    initTimer1ForKeyboardTimeouts();
-}
-
-static void initGpioForKeyboardSignals(void)
-{
-    ret_code_t errorCode;
-
-    if (!nrf_drv_gpiote_is_init())
-    {
-        errorCode = nrf_drv_gpiote_init();
-        APP_ERROR_CHECK(errorCode);
-    }
-
-    nrf_drv_gpiote_in_config_t inConfig = GPIOTE_CONFIG_IN_SENSE_HITOLO(true);
-    errorCode = nrf_drv_gpiote_in_init(KEYBOARD_CLOCK_PIN, &inConfig, keyboardClockFallingEdgeHandler);
-    APP_ERROR_CHECK(errorCode);
-    nrf_drv_gpiote_in_event_enable(KEYBOARD_CLOCK_PIN, true);
-
-    nrf_gpio_cfg_input(KEYBOARD_DATA_PIN, NRF_GPIO_PIN_NOPULL);
-}
-
-static void keyboardClockFallingEdgeHandler(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action)
-{
-    switch (g_keyboardMode)
-    {
-    case RECEIVING:
-        keyboardReceiveBit();
-        break;
-    case TRANSMITTING:
-        keyboardTransmitBit();
-        break;
-    }
-}
-
-static void keyboardReceiveBit(void)
-{
-    uint32_t dataBit = nrf_gpio_pin_read(KEYBOARD_DATA_PIN);
-
-    // We just detected a bit clock edge so set a timeout to occur in 128usec if no new bit is seen for this frame.
-    g_keyboardBitTimeout = 1;
-
-    // g_keyboardReceivedBits will accumulate 1 start bit, 8 data bits, 1 parity bit, and 1 stop bit.
-    // The 8 data bits are received in lsb to msb order.
-    g_keyboardReceivedBits >>= 1;
-    g_keyboardReceivedBits |= (dataBit << 10);
-
-    g_keyboardReceiveBitCount++;
-    if (g_keyboardReceiveBitCount == 1 && dataBit != 0)
-    {
-        // The first bit is the start bit and it must be 0.
-        handleKeyboardReceiveError();
-        PRINTF_RAW("<bad_start_bit>\n");
-    }
-    else if (g_keyboardReceiveBitCount == 11 && dataBit != 1)
-    {
-        // The last bit is the stop bit and it must be 1.
-        handleKeyboardReceiveError();
-        PRINTF_RAW("<bad_stop_bit>\n");
-    }
-    else if (g_keyboardReceiveBitCount == 11 && dataBit == 1)
-    {
-        // Have finished receiving the whole frame and don't need a bit timeout check anymore so disable it.
-        g_keyboardBitTimeout = -1;
-
-        // The whole frame was received without errors so parse it.
-        uint8_t data = (g_keyboardReceivedBits >> 1) & 0xFF;
-
-        PRINTF_RAW("%04X - ", g_keyboardReceivedBits);
-        PRINTF_RAW("%02X - ", data);
-
-        if (data == 0xE0)
-        {
-            // Switch to extended scan code table.
-            g_keyboardReceiveScanState.pScanTable = g_scanCodesExtended;
-            g_keyboardReceiveScanState.pScanToHidTable = g_scanCodesToHidExtended;
-        }
-        else if (data == 0xE1)
-        {
-            // Expect a two byte scan code instead of the usual single byte version.
-            g_keyboardReceiveScanState.expectedScanCodeBytes = 2;
-            g_keyboardReceiveScanState.lastScanCode = '\0';
-        }
-        else if (data == 0xF0)
-        {
-            // The next byte will be a breaking (key release) scan code.
-            g_keyboardReceiveScanState.isBreak = true;
-        }
-        else if (data == 0xFA)
-        {
-            PRINTF_RAW("<ACK>");
-            if (g_keyboardTransmitCommandByteIndex < g_keyboardTransmitCommandLength)
-            {
-                // The keyboard just acked the byte of the command that was previously sent so can prepare to transmit the
-                // next byte.
-                startKeyboardByteTransmit();
-            }
-        }
-        else if (g_keyboardReceiveScanState.expectedScanCodeBytes > 1)
-        {
-            g_keyboardReceiveScanState.lastScanCode = data;
-            g_keyboardReceiveScanState.expectedScanCodeBytes--;
-        }
-        else
-        {
-            if (g_keyboardReceiveScanState.lastScanCode == 0x00)
-            {
-                PRINTF_RAW("[%02X] - %s - %s",
-                           g_keyboardReceiveScanState.pScanToHidTable[data], 
-                           g_keyboardReceiveScanState.pScanTable[data], 
-                           g_keyboardReceiveScanState.isBreak ? "BREAK" : "MAKE");
-                if (DEBUG_SHOW_ASCII_TEXT && !g_keyboardReceiveScanState.isBreak)
-                {
-                    printf("%s", g_keyboardReceiveScanState.pScanTable[data]);
-                    fflush(stdout);
-                }
-                updateKeyboardInputReport(g_keyboardReceiveScanState.pScanToHidTable[data], g_keyboardReceiveScanState.isBreak);
-            }
-            else if (g_keyboardReceiveScanState.lastScanCode == 0x14 && data == 0x77)
-            {
-                PRINTF_RAW("<Pause> - %s", g_keyboardReceiveScanState.isBreak ? "BREAK" : "MAKE");
-                updateKeyboardInputReport(HID_KEY_PAUSE, g_keyboardReceiveScanState.isBreak);
-            }
-            else
-            {
-                PRINTF_RAW("<unknown> - %s", g_keyboardReceiveScanState.isBreak ? "BREAK" : "MAKE");
-            }
-            initReceiveScanState();
-            g_keyboardRequestingResend = false;
-        }
-
-        PRINTF_RAW("\n");
-
-        g_keyboardReceivedBits = 0;
-        g_keyboardReceiveBitCount = 0;
-        g_keyboardParity = 0;
-    }
-    else if (g_keyboardReceiveBitCount >= 2 && g_keyboardReceiveBitCount <= 10)
-    {
-        // Accumulate count of set bits and check if parity is odd or not.
-        if (dataBit == 1)
-        {
-            g_keyboardParity++;
-        }
-        if (g_keyboardReceiveBitCount == 10 && (g_keyboardParity & 1) != 1)
-        {
-            // Parity wasn't odd.
-            handleKeyboardReceiveError();
-            PRINTF_RAW("<bad_parity>\n");
-        }
-    }
-}
-
-static void handleKeyboardReceiveError(void)
-{
-    PRINTF_RAW("%04X - ", g_keyboardReceivedBits);
-    askKeyboardToResendLastByte();
-}
-
-static void askKeyboardToResendLastByte(void)
-{
-    uint8_t resendCommand = 0xFE;
-    
-    g_keyboardRequestingResend = true;
-    keyboardSendCommand(&resendCommand, sizeof(resendCommand));
-}
-
-static void keyboardSendCommand(const uint8_t* pCommand, size_t commandLength)
-{
-    // Setup global variables used to transmit this command, a bit at a time.
-    ASSERT ( commandLength <= sizeof(g_keyboardTransmitCommandBuffer) );
-    memcpy((void*)g_keyboardTransmitCommandBuffer, pCommand, commandLength);
-    g_keyboardTransmitCommandLength = commandLength;
-    g_keyboardTransmitCommandByteIndex = 0;
-
-    startKeyboardByteTransmit();
-}
-
-static void startKeyboardByteTransmit(void)
-{
-    // Setup globals to start transmitting the bytes.
-    g_keyboardMode = TRANSMITTING;
-    g_keyboardTransmitBitCount = 0;
-    g_keyboardParity = 0;
-
-    // Hold the clock low for >= 100usecs before starting to send the command.
-    nrf_drv_gpiote_in_event_disable(KEYBOARD_CLOCK_PIN);
-    setPinDirectionToOutput(KEYBOARD_CLOCK_PIN);
-    nrf_gpio_pin_clear(KEYBOARD_CLOCK_PIN);
-
-    g_keyboardHoldClockLowTimeout = 1;
-}
-
-static void initReceiveScanState()
-{
-    g_keyboardReceiveScanState.pScanTable = ALPHA_SCAN_CODES;
-    g_keyboardReceiveScanState.pScanToHidTable = ALPHA_HID_CODES;
-    g_keyboardReceiveScanState.expectedScanCodeBytes = 1;
-    g_keyboardReceiveScanState.lastScanCode = '\0';
-    g_keyboardReceiveScanState.isBreak = false;
-}
-
-static void updateKeyboardInputReport(HidKeyboardUsageValues key, bool isBreak)
-{
-    static HidKeyboardInputReport overflowReport = { 0x00, 0x00, {HID_KEY_ERROR_ROLLOVER,
-                                                                  HID_KEY_ERROR_ROLLOVER,
-                                                                  HID_KEY_ERROR_ROLLOVER,
-                                                                  HID_KEY_ERROR_ROLLOVER,
-                                                                  HID_KEY_ERROR_ROLLOVER,
-                                                                  HID_KEY_ERROR_ROLLOVER}};
-    size_t length = sizeof(g_keyboardInputReport.keyArray);
-    HidKeyboardInputReport* pReportToSend = &g_keyboardInputReport;
-    size_t i;
-
-    if (key == 0x00)
-    {
-        // Key doesn't have recognized HID code so just return.
-        return;
-    }
-    
-    if (key >= HID_KEY_LEFT_CONTROL && key <= HID_KEY_RIGHT_GUI)
-    {
-        // Needs to set/clear bit in modifierBitmask field of input report.
-        uint8_t modifierBit = (1 << (key - HID_KEY_LEFT_CONTROL));
-        if (isBreak)
-        {
-            g_keyboardInputReport.modifierBitmask &= ~modifierBit;
-        }
-        else
-        {
-            g_keyboardInputReport.modifierBitmask |= modifierBit;
-        }
-    }
-    else
-    {
-        // Needs to set/clear value in keyArray field of input report.
-        if (isBreak)
-        {
-            // Attempt to find key in array and delete it.
-            for (i = 0 ; i < length ; i++)
-            {
-                if (g_keyboardInputReport.keyArray[i] == key)
-                {
-                    
-                    memmove(&g_keyboardInputReport.keyArray[i], 
-                            &g_keyboardInputReport.keyArray[i+1],
-                            length - i - 1);
-                    g_keyboardInputReport.keyArray[length - 1] = 0x00;
-                    break;
-                }
-            }
-        }
-        else
-        {
-            // Add key to array if not already contained within.
-            for (i = 0 ; i < length ; i++)
-            {
-                if (g_keyboardInputReport.keyArray[i] == key || g_keyboardInputReport.keyArray[i] == 0x00)
-                {
-                    g_keyboardInputReport.keyArray[i] = key;
-                    break;
-                }
-            }
-
-            // Set all items to HID_KEY_ERROR_ROLLOVER if the array is full.
-            if (i == length)
-            {
-                overflowReport.modifierBitmask = g_keyboardInputReport.modifierBitmask;
-                pReportToSend = &overflowReport;
-            }
-        }
-    }
-
-    // Queue up the input report to be sent via BLE from the main() loop.
-    uint32_t errorCode = app_sched_event_put(pReportToSend, sizeof(*pReportToSend), sendInputReportHandler);
-    APP_ERROR_CHECK(errorCode);
-}
-
-static void sendInputReportHandler(void* pEventData, uint16_t eventSize)
-{
-    HidKeyboardInputReport* pReportToSend = (HidKeyboardInputReport*)pEventData;
-    uint32_t errorCode;
-
-    ASSERT ( eventSize == sizeof(*pReportToSend) );
-
-    if (DEBUG_SHOW_HID_REPORT)
-    {
-        printf("{%02X, %02X, %02X, %02X, %02X, %02X, %02X, %02X}\n",
-               pReportToSend->modifierBitmask,
-               pReportToSend->reserved,
-               pReportToSend->keyArray[0],
-               pReportToSend->keyArray[1],
-               pReportToSend->keyArray[2],
-               pReportToSend->keyArray[3],
-               pReportToSend->keyArray[4],
-               pReportToSend->keyArray[5]);
-    }
-    
-    if (g_connHandle == BLE_CONN_HANDLE_INVALID)
-    {
-        // Nothing to do if there is no BLE connection.
-        return;
-    }
-
-    if (!g_inBootMode)
-    {
-        errorCode = ble_hids_inp_rep_send(&g_hids,
-                                          INPUT_REPORT_KEYS_INDEX,
-                                          sizeof(*pReportToSend),
-                                          (uint8_t*)pReportToSend);
-    }
-    else
-    {
-        errorCode = ble_hids_boot_kb_inp_rep_send(&g_hids,
-                                                  sizeof(*pReportToSend),
-                                                  (uint8_t*)pReportToSend);
-    }
-    APP_ERROR_CHECK(errorCode);
-}
-
-static void keyboardTransmitBit(void)
-{
-    // We just detected a bit clock edge so set a timeout to occur in 128usec if no new bit is seen for this frame.
-    g_keyboardBitTimeout = 1;
-
-    // Will send bits in lsb to msb order. A start bit was already sent before the keyboard started automatically
-    // driving the clock. Still need to send the data bits, parity bit, and stop bit plus wait for the ack bit.
-    uint8_t bitToTransmit = (g_keyboardTransmitCommandBuffer[g_keyboardTransmitCommandByteIndex] >> g_keyboardTransmitBitCount) & 1;
-
-    g_keyboardTransmitBitCount++;
-    if (g_keyboardTransmitBitCount < 9)
-    {
-        // Accumulate the parity count.
-        if (bitToTransmit == 1)
-        {
-            g_keyboardParity++;
-        }
-
-        // Transmit out the current bit on keyboard data pin.
-        nrf_gpio_pin_write(KEYBOARD_DATA_PIN, bitToTransmit);
-    }
-    else if (g_keyboardTransmitBitCount == 9)
-    {
-        // Transmit parity bit to make the bit count odd.
-        if ((g_keyboardParity & 1) == 0)
-        {
-            // Parity of data is even so set parity bit to make it odd.
-            nrf_gpio_pin_set(KEYBOARD_DATA_PIN);
-        }
-        else
-        {
-            // Parity of data is already odd so clear parity bit to keep it odd.
-            nrf_gpio_pin_clear(KEYBOARD_DATA_PIN);
-        }
-    }
-    else if (g_keyboardTransmitBitCount == 10)
-    {
-        // Transmit the stop bit by making the data pin an input and allowing it to be pulled high.
-        setPinDirectionToInput(KEYBOARD_DATA_PIN);
-    }
-    else if (g_keyboardTransmitBitCount == 11)
-    {
-        // Have received the last expected clock edge so disable the bit timeout.
-        g_keyboardBitTimeout = -1;
-        
-        // Expect the ack bit to be clear.
-        uint32_t ackBit = nrf_gpio_pin_read(KEYBOARD_DATA_PIN);
-        if (ackBit != 0)
-        {
-            // UNDONE: Handle this better.
-           PRINTF_RAW("<bad_ack_bit>\n");
-        }
-
-        g_keyboardTransmitCommandByteIndex++;
-
-        // Switch to receive mode. This might be to receive the ACK if sending a multi-byte command where it will
-        // switch back to transmit mode again after receiving the ack.
-        g_keyboardMode = RECEIVING;
-        g_keyboardReceivedBits = 0;
-        g_keyboardReceiveBitCount = 0;
-        g_keyboardParity = 0;
-        if (!g_keyboardRequestingResend)
-        {
-            initReceiveScanState();
-        }
-    }
-}
-
-static inline void setPinDirectionToOutput(uint32_t pin)
-{
-    NRF_GPIO->DIRSET = (1UL << pin);
-}
-
-static inline void setPinDirectionToInput(uint32_t pin)
-{
-    NRF_GPIO->DIRCLR = (1UL << pin);
-}
-
-
-
-
-static void initTimer1ForKeyboardTimeouts(void)
-{
-    uint32_t errorCode;
-
-    errorCode = nrf_drv_timer_init(&g_timer1, NULL, keyboardTimerHandler);
-    APP_ERROR_CHECK(errorCode);
-
-    // UNDONE: Make the timeout a macro.
-    // Run the timer at a period of 128 usec (31250 / 4).
-    nrf_drv_timer_extended_compare(&g_timer1, 
-                                   NRF_TIMER_CC_CHANNEL0, 
-                                   4, 
-                                   NRF_TIMER_SHORT_COMPARE0_CLEAR_MASK, 
-                                   true);
-
-    nrf_drv_timer_enable(&g_timer1);
-}
-
-static void keyboardTimerHandler(nrf_timer_event_t eventType, void* pvContext)
-{
-    if (eventType != NRF_TIMER_EVENT_COMPARE0)
-    {
-        return;
-    }
-
-
-    if (g_keyboardBitTimeout != -1)
-    {
-        if (g_keyboardBitTimeout == 0)
-        {
-            // Took too long to get next clock edge so retry.
-            switch (g_keyboardMode)
-            {
-            case RECEIVING:
-                // Ask keyboard to send byte again.
-                handleKeyboardReceiveError();
-                break;
-            case TRANSMITTING:
-                // Try to send last byte again.
-                startKeyboardByteTransmit();
-                break;
-
-            }
-            PRINTF_RAW("<bit_timeout>\n");
-        }
-        g_keyboardBitTimeout--;
-    }
-
-    if (g_keyboardHoldClockLowTimeout != -1)
-    {
-        if (g_keyboardHoldClockLowTimeout == 0)
-        {
-            // Have held the clock low for > 100usecs so can start sending start bit now.
-            setPinDirectionToOutput(KEYBOARD_DATA_PIN);
-            nrf_gpio_pin_clear(KEYBOARD_DATA_PIN);
-
-            // UNDONE: Get rid of the magic 128 usec value.
-            // It is an error if the keyboard doesn't send us the first clock edge in 15msecs.
-            g_keyboardBitTimeout = (15000 / 128);
-
-            // Now expect the keyboard to generate clock edges.
-            g_keyboardTransmitBitCount = 0;
-            g_keyboardParity = 0;
-            setPinDirectionToInput(KEYBOARD_CLOCK_PIN);
-            nrf_drv_gpiote_in_event_enable(KEYBOARD_CLOCK_PIN, true);
-        }
-        g_keyboardHoldClockLowTimeout--;
-    }
-}
-
-static void sendInputReportHandler2(HidKeyboardInputReport* pReportToSend, void* pvContext)
+static void sendInputReportHandler(HidKeyboardInputReport* pReportToSend, void* pvContext)
 {
     uint32_t errorCode;
 
