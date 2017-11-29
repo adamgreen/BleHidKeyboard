@@ -27,14 +27,18 @@ typedef void (*keyStateCallback) (HidKeyboardInputReport* pReport, void* pvConte
 
 typedef struct KeyboardMatrix
 {
-    keyStateCallback*       pCallback;
+    keyStateCallback        pCallback;
     void*                   pvContext;
+    app_timer_id_t          timerId;
+    uint32_t                scanStep;
+    uint8_t                 rowsRead;
+    bool                    scanningStarted;
+    bool                    overflowDetected;
     // Use two of the 16-bit I/O expanders for interfacing to the keyboard matrix.
     MCP23018                mcp23018_1;
     HidKeyboardInputReport  reportPrev;
     HidKeyboardInputReport  reportCurr;
     app_timer_t             timerData;
-    app_timer_id_t          timerId;
 } KeyboardMatrix;
 
 
@@ -42,7 +46,7 @@ uint32_t kbmatrixInit(KeyboardMatrix* pThis,
                       uint8_t i2cAddress1, uint8_t i2cAddress2, 
                       uint32_t sclPin, uint32_t sdaPin,
                       uint32_t timerPrescaler,
-                      keyStateCallback* pCallback, void* pvContext);
+                      keyStateCallback pCallback, void* pvContext);
 void     kbmatrixUninit(KeyboardMatrix* pThis);
 
 

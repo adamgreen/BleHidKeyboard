@@ -19,16 +19,17 @@
 
 
 static void scanKeyboardMatrixCallback(void* pContext);
+static void updateKeyboardInputReport(KeyboardMatrix* pThis, HidKeyboardUsageValues key);
 
 
 uint32_t kbmatrixInit(KeyboardMatrix* pThis,
                       uint8_t i2cAddress1, uint8_t i2cAddress2, 
                       uint32_t sclPin, uint32_t sdaPin,
                       uint32_t timerPrescaler,
-                      keyStateCallback* pCallback, void* pvContext)
+                      keyStateCallback pCallback, void* pvContext)
 {
     ASSERT ( pThis );
-// UNDONE:    ASSERT ( pCallback );
+    ASSERT ( pCallback );
 
     memset(pThis, 0, sizeof(*pThis));
     pThis->pCallback = pCallback;
@@ -78,59 +79,148 @@ uint32_t kbmatrixInit(KeyboardMatrix* pThis,
     APP_ERROR_CHECK(errorCode);
 
     // NOTE: APP_TIMER_TICKS results in 64-bit math.
-    uint32_t scanInterval = APP_TIMER_TICKS(1000, timerPrescaler);
+    uint32_t scanInterval = APP_TIMER_TICKS(2, timerPrescaler);
     errorCode = app_timer_start(pThis->timerId, scanInterval, pThis);
     APP_ERROR_CHECK(errorCode);
 
     return errorCode;
 }
 
+// UNDONE: Move these constants
+#define COLUMN_COUNT 2
+#define ROW_COUNT    2
+#define SCAN_STEPS   ((COLUMN_COUNT) * 2)
+#define ROW_BITMASK  ((1 << (ROW_COUNT)) - 1)
+
+static const HidKeyboardUsageValues g_keymap[COLUMN_COUNT][ROW_COUNT] =
+{
+    { HID_KEY_A,        HID_KEY_SPACEBAR },
+    { HID_KEY_PERIOD,   HID_KEY_PERIOD }
+};
+
 static void scanKeyboardMatrixCallback(void* pContext)
 {
+    static const uint8_t overflowKeyArray[6] = {HID_KEY_ERROR_ROLLOVER,
+                                                HID_KEY_ERROR_ROLLOVER,
+                                                HID_KEY_ERROR_ROLLOVER,
+                                                HID_KEY_ERROR_ROLLOVER,
+                                                HID_KEY_ERROR_ROLLOVER,
+                                                HID_KEY_ERROR_ROLLOVER};
     KeyboardMatrix* pThis = (KeyboardMatrix*)pContext;
-
-    // UNDONE: Just hacking in here for now.
-    static bool     firstScan = true;
-    static uint32_t scanStep = 0;
-    static uint8_t  portA = 0xFF;
-    static uint8_t  portB = 0xFF;
     uint32_t        errorCode = 0;
 
-    if (!firstScan)
+    // Just skip this timer tick if the previous I/O hasn't completed yet and try again on the next one.
+    if (pThis->scanningStarted && !mcp23018HasAsyncSetCompleted(&pThis->mcp23018_1))
     {
-        // Make sure that previous async command completed.
-        ASSERT ( mcp23018HasAsyncSetCompleted(&pThis->mcp23018_1) );
+        return;
+    }
 
-        // On even steps, the previous step's read should have completed so print it out.
-        if ((scanStep & 1) == 0)
-        {
-            printf("%u-%u\n", (scanStep == 2) ? 0 : 1, portB ^ 0x03);
-        }
-    }
-    firstScan = false;
-    
-    switch (scanStep)
+    uint32_t column = pThis->scanStep >> 1;
+    uint32_t readStep = pThis->scanStep & 1;
+    if (readStep)
     {
-    case 0:
-        // Pull first column low.
-        errorCode = mcp23018AsyncSetGpio(&pThis->mcp23018_1, 0xFE, 0x00);
+        // Read in row outputs from port B in this step.
+        errorCode = mcp23018AsyncGetGpio(&pThis->mcp23018_1, NULL, &pThis->rowsRead);
         APP_ERROR_CHECK(errorCode);
-        break;
-    case 1:
-    case 3:
-        // Read the rows.
-        errorCode = mcp23018AsyncGetGpio(&pThis->mcp23018_1, &portA, &portB);
-        APP_ERROR_CHECK(errorCode);
-        break;
-    case 2:
-        // Pull second column low.
-        errorCode = mcp23018AsyncSetGpio(&pThis->mcp23018_1, 0xFD, 0x00);
-        APP_ERROR_CHECK(errorCode);
-        break;
-    default:
-        ASSERT ( false );
     }
-    scanStep = (scanStep + 1) % 4;
+    else
+    {
+        // The previous step's read should have completed so print it out.
+        uint8_t rowsPressed = (pThis->rowsRead ^ ROW_BITMASK) & ROW_BITMASK;
+        if (rowsPressed && pThis->scanningStarted)
+        {
+            uint8_t  rowMask = 1;
+            uint32_t lastColumnRead;
+
+            // These rows were read when the previous column was pulled low and not the current row.
+            if (column == 0)
+                lastColumnRead = COLUMN_COUNT - 1;
+            else
+                lastColumnRead = column - 1;
+            for (int row = 0 ; row < ROW_COUNT ; row++)
+            {
+                if (rowMask & rowsPressed)
+                {
+                    updateKeyboardInputReport(pThis, g_keymap[lastColumnRead][row]);
+
+                    // UNDONE: Need a way to turn this off and on.
+                    //printf("%lu-%u ", lastColumnRead, row);
+                }
+                rowMask <<= 1;
+            }
+            //printf("\n");
+        }
+
+        // Pull one of the column outputs low on port A in this step.
+        uint32_t bitmask = 0xFFFFFFFF & ~(1 << column);
+        errorCode = mcp23018AsyncSetGpio(&pThis->mcp23018_1, bitmask & 0xFF, 0x00);
+        APP_ERROR_CHECK(errorCode);
+    }
+    
+    // At the beginning of a pass, finalize the previous scan results and prepare to fill in the report for this scan.
+    if (pThis->scanStep == 0 && pThis->scanningStarted)
+    {
+        if (pThis->overflowDetected)
+        {
+            // Set all keys to overflow error if more than 6 keys were pressed at once.
+            memcpy(pThis->reportCurr.keyArray, overflowKeyArray, sizeof(pThis->reportCurr.keyArray));
+        }
+
+        if (0 != memcmp(&pThis->reportPrev, &pThis->reportCurr, sizeof(pThis->reportPrev)))
+        {
+            // Key state has changed since the last scan so it should be sent to host via callback.
+            pThis->pCallback(&pThis->reportCurr, pThis->pvContext);
+        }
+
+        // Remember the current report in prevPrev.
+        pThis->reportPrev = pThis->reportCurr;
+        
+        // Initialize reportCurr to be filled in with this scan's results.
+        memset(&pThis->reportCurr, 0, sizeof(pThis->reportCurr));
+        pThis->overflowDetected = false;
+    }
+
+    pThis->scanningStarted = true;
+    pThis->scanStep++;
+    if (pThis->scanStep >= SCAN_STEPS)
+        pThis->scanStep = 0;
+}
+
+static void updateKeyboardInputReport(KeyboardMatrix* pThis, HidKeyboardUsageValues key)
+{
+    const size_t length = sizeof(pThis->reportCurr.keyArray);
+    size_t i;
+
+    if (key == 0x00)
+    {
+        // Key doesn't have recognized HID code so just return.
+        return;
+    }
+
+    // Some usage values are stored in keyArray of input report and other are bits in modifierBitmask.
+    if (key >= HID_KEY_LEFT_CONTROL && key <= HID_KEY_RIGHT_GUI)
+    {
+        // Needs to set bit in modifierBitmask field of input report.
+        uint8_t modifierBit = (1 << (key - HID_KEY_LEFT_CONTROL));
+        pThis->reportCurr.modifierBitmask |= modifierBit;
+    }
+    else
+    {
+        // Needs to set value in keyArray field of input report.
+        for (i = 0 ; i < length ; i++)
+        {
+            if (pThis->reportCurr.keyArray[i] == key || pThis->reportCurr.keyArray[i] == 0x00)
+            {
+                pThis->reportCurr.keyArray[i] = key;
+                break;
+            }
+        }
+
+        // Detect and flag if overflow of keyArray has occurred. Overflow error will be sent to host at end of scan
+        // cycle if this flag is set.
+        if (i == length)
+            pThis->overflowDetected = true;
+    }
 }
 
 void kbmatrixUninit(KeyboardMatrix* pThis)

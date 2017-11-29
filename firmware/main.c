@@ -74,7 +74,7 @@
 #define DEBUG_SHOW_ASCII_TEXT       0
 
 // Set to non-zero value to dump BLE HID reports.
-#define DEBUG_SHOW_HID_REPORT       0
+#define DEBUG_SHOW_HID_REPORT       1
 
 // Set to non-zero value if we want to remap keyboard to be special alphabetical order keyboard.
 #define KEYBOARD_IS_SPECIAL_ABC     1
@@ -347,6 +347,7 @@ static void keyboardTransmitBit(void);
 static inline void setPinDirectionToOutput(uint32_t pin);
 static inline void setPinDirectionToInput(uint32_t pin);
 static void initTimer1ForKeyboardTimeouts(void);
+static void sendInputReportHandler2(HidKeyboardInputReport* pReportToSend, void* pvContext);
 static void enterLowPowerModeAndWakeOnEvent(void);
 
 
@@ -385,7 +386,8 @@ int main(void)
                              KEYBOARD_MCP23018_1_I2C_ADDRESS, KEYBOARD_MCP23018_2_I2C_ADDRESS,
                              KEYBOARD_SCL_PIN, KEYBOARD_SDA_PIN,
                              APP_TIMER_PRESCALER,
-                             NULL, NULL);
+                             sendInputReportHandler2, NULL);
+
     // Sleep until a new event occurs and then check the scheduler to execute any queued operations.
     while (1)
     {
@@ -1633,6 +1635,45 @@ static void keyboardTimerHandler(nrf_timer_event_t eventType, void* pvContext)
         }
         g_keyboardHoldClockLowTimeout--;
     }
+}
+
+static void sendInputReportHandler2(HidKeyboardInputReport* pReportToSend, void* pvContext)
+{
+    uint32_t errorCode;
+
+    if (DEBUG_SHOW_HID_REPORT)
+    {
+        printf("{%02X, %02X, %02X, %02X, %02X, %02X, %02X, %02X}\n",
+               pReportToSend->modifierBitmask,
+               pReportToSend->reserved,
+               pReportToSend->keyArray[0],
+               pReportToSend->keyArray[1],
+               pReportToSend->keyArray[2],
+               pReportToSend->keyArray[3],
+               pReportToSend->keyArray[4],
+               pReportToSend->keyArray[5]);
+    }
+    
+    if (g_connHandle == BLE_CONN_HANDLE_INVALID)
+    {
+        // Nothing to do if there is no BLE connection.
+        return;
+    }
+
+    if (!g_inBootMode)
+    {
+        errorCode = ble_hids_inp_rep_send(&g_hids,
+                                          INPUT_REPORT_KEYS_INDEX,
+                                          sizeof(*pReportToSend),
+                                          (uint8_t*)pReportToSend);
+    }
+    else
+    {
+        errorCode = ble_hids_boot_kb_inp_rep_send(&g_hids,
+                                                  sizeof(*pReportToSend),
+                                                  (uint8_t*)pReportToSend);
+    }
+    APP_ERROR_CHECK(errorCode);
 }
 
 static void enterLowPowerModeAndWakeOnEvent(void)
