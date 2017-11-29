@@ -133,6 +133,7 @@ CFLAGS += -DS110
 CFLAGS += -DBLE_STACK_SUPPORT_REQD
 CFLAGS += -DSWI_DISABLE0
 CFLAGS += -DBSP_UART_SUPPORT
+CFLAGS += -DDEBUG_NRF_USER
 CFLAGS += -mcpu=cortex-m0
 CFLAGS += -mthumb -mabi=aapcs --std=gnu99
 CFLAGS += -Wall -Werror -O3 -g3
