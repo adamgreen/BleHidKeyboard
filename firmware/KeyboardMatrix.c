@@ -1,4 +1,4 @@
-/*  Copyright (C) 2017  Adam Green (https://github.com/adamgreen)
+/*  Copyright (C) 2018  Adam Green (https://github.com/adamgreen)
 
     This program is free software; you can redistribute it and/or
     modify it under the terms of the GNU General Public License
@@ -74,13 +74,13 @@ uint32_t kbmatrixInit(KeyboardMatrix* pThis,
     // Start scanning timer.
     pThis->timerId = &pThis->timerData;
     errorCode = app_timer_create(&pThis->timerId,
-                                APP_TIMER_MODE_REPEATED,
+                                APP_TIMER_MODE_SINGLE_SHOT,
                                 scanKeyboardMatrixCallback);
     APP_ERROR_CHECK(errorCode);
 
     // NOTE: APP_TIMER_TICKS results in 64-bit math.
-    uint32_t scanInterval = APP_TIMER_TICKS(2, timerPrescaler);
-    errorCode = app_timer_start(pThis->timerId, scanInterval, pThis);
+    pThis->scanInterval = APP_TIMER_TICKS(2, timerPrescaler);
+    errorCode = app_timer_start(pThis->timerId, pThis->scanInterval, pThis);
     APP_ERROR_CHECK(errorCode);
 
     return errorCode;
@@ -108,6 +108,12 @@ static void scanKeyboardMatrixCallback(void* pContext)
                                                 HID_KEY_ERROR_ROLLOVER};
     KeyboardMatrix* pThis = (KeyboardMatrix*)pContext;
     uint32_t        errorCode = 0;
+
+    // First queue up the next timer tick.
+    // Don't use a repeating timer since it can result in the application queue filling up when some BLE events run
+    // too long in main().
+    errorCode = app_timer_start(pThis->timerId, pThis->scanInterval, pThis);
+    APP_ERROR_CHECK(errorCode);
 
     // Just skip this timer tick if the previous I/O hasn't completed yet and try again on the next one.
     if (pThis->scanningStarted && !mcp23018HasAsyncSetCompleted(&pThis->mcp23018_1))

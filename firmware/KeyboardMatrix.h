@@ -1,4 +1,4 @@
-/*  Copyright (C) 2017  Adam Green (https://github.com/adamgreen)
+/*  Copyright (C) 2018  Adam Green (https://github.com/adamgreen)
 
     This program is free software; you can redistribute it and/or
     modify it under the terms of the GNU General Public License
@@ -31,6 +31,7 @@ typedef struct KeyboardMatrix
     void*                   pvContext;
     app_timer_id_t          timerId;
     uint32_t                scanStep;
+    uint32_t                scanInterval;
     uint8_t                 rowsRead;
     bool                    scanningStarted;
     bool                    overflowDetected;
