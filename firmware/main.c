@@ -1,4 +1,4 @@
-/*  Copyright (C) 2017  Adam Green (https://github.com/adamgreen)
+/*  Copyright (C) 2018  Adam Green (https://github.com/adamgreen)
 
     This program is free software; you can redistribute it and/or
     modify it under the terms of the GNU General Public License
@@ -54,6 +54,9 @@
 // nRF51 pins connected to the I2C pins on the MCP23018 I/O expanders used with the keyboard matrix.
 #define KEYBOARD_SCL_PIN                1
 #define KEYBOARD_SDA_PIN                2
+
+// This will be the INTA or INTB pin of the MCP23018 I/O expander which corresponds to the row of the spacebar key.
+#define KEYBOARD_INTERRUPT_PIN          3
 
 // There are two MCP23018 16-bit I/O expanders used to connect to all of the columns and rows of the keyboard matrix.
 // The following defines provide the I2C addresss of these two MCP23018 expanders.
@@ -225,6 +228,9 @@ static dm_handle_t                  g_bondedPeerHandle;
 // Advertise that this is a standard BLE HID device.
 static ble_uuid_t                   g_advertisingUuids[] = {{BLE_UUID_HUMAN_INTERFACE_DEVICE_SERVICE, BLE_UUID_TYPE_BLE}};
 
+// Object used to interact with the keyboard matrix.
+static KeyboardMatrix               g_keyboardMatrix;
+
 
 // Forward function declarations.
 static void initUart(void);
@@ -283,16 +289,14 @@ int main(void)
     initSensorSimulator();
     initConnectionParams();
 
-
     printf("\nBleHidKeyboard starting...\n");
     startRtcTimers();
     errorCode = ble_advertising_start(BLE_ADV_MODE_FAST);
     APP_ERROR_CHECK(errorCode);
 
-    KeyboardMatrix keyboardMatrix;
-    errorCode = kbmatrixInit(&keyboardMatrix, 
+    errorCode = kbmatrixInit(&g_keyboardMatrix,
                              KEYBOARD_MCP23018_1_I2C_ADDRESS, KEYBOARD_MCP23018_2_I2C_ADDRESS,
-                             KEYBOARD_SCL_PIN, KEYBOARD_SDA_PIN,
+                             KEYBOARD_SCL_PIN, KEYBOARD_SDA_PIN, KEYBOARD_INTERRUPT_PIN,
                              APP_TIMER_PRESCALER,
                              sendInputReportHandler, NULL);
 
@@ -432,7 +436,9 @@ static void enterSleepMode(void)
     // Prepare wakeup buttons.
     errorCode = bsp_btn_ble_sleep_mode_prepare();
     APP_ERROR_CHECK(errorCode);
-
+    errorCode = kbmatrixConfigureForWakeupOnSpacebar(&g_keyboardMatrix);
+    APP_ERROR_CHECK(errorCode);
+    
     // Go to system-off mode (this function will not return; wakeup will cause a reset).
     errorCode = sd_power_system_off();
     APP_ERROR_CHECK(errorCode);

@@ -13,6 +13,7 @@
 /* KeyboardMatrix module which makes use of the I2C based MCP23018 I/O Expander to interface with the column inputs
    and row outputs of a PC matrix keyboard. */
 #include <app_error.h>
+#include <nrf_gpio.h>
 #include <app_timer.h>
 #include <string.h>
 #include "KeyboardMatrix.h"
@@ -24,7 +25,7 @@ static void updateKeyboardInputReport(KeyboardMatrix* pThis, HidKeyboardUsageVal
 
 uint32_t kbmatrixInit(KeyboardMatrix* pThis,
                       uint8_t i2cAddress1, uint8_t i2cAddress2, 
-                      uint32_t sclPin, uint32_t sdaPin,
+                      uint32_t sclPin, uint32_t sdaPin, uint32_t interruptPin,
                       uint32_t timerPrescaler,
                       keyStateCallback pCallback, void* pvContext)
 {
@@ -34,6 +35,7 @@ uint32_t kbmatrixInit(KeyboardMatrix* pThis,
     memset(pThis, 0, sizeof(*pThis));
     pThis->pCallback = pCallback;
     pThis->pvContext = pvContext;
+    pThis->interruptPin = interruptPin;
 
     uint32_t errorCode = i2cInit(sclPin, sdaPin);
     APP_ERROR_CHECK(errorCode);
@@ -234,4 +236,24 @@ void kbmatrixUninit(KeyboardMatrix* pThis)
     ASSERT ( pThis );
 
     i2cUninit();
+}
+
+uint32_t kbmatrixConfigureForWakeupOnSpacebar(KeyboardMatrix* pThis)
+{
+    // Configure INTB to go low when the spacebar's row goes low.
+    uint32_t errorCode = mcp23018SetDefaultValues(&pThis->mcp23018_1, 0x00, 0x02);
+    APP_ERROR_CHECK(errorCode);
+    errorCode = mcp23018SetInterruptControlValues(&pThis->mcp23018_1, 0x00, 0x02);
+    APP_ERROR_CHECK(errorCode);
+    errorCode = mcp23018SetGpioInterruptEnables(&pThis->mcp23018_1, 0x00, 0x02);
+    APP_ERROR_CHECK(errorCode);
+
+    // Pull the spacebar's column low so that its row will go low when the spacebar is pressed, triggering interrupt.
+    errorCode = mcp23018AsyncSetGpio(&pThis->mcp23018_1, ~1, 0x00);
+    APP_ERROR_CHECK(errorCode);
+
+    // Configure the INTB pin to be a sense/wakeup source.
+    nrf_gpio_cfg_sense_input(pThis->interruptPin, NRF_GPIO_PIN_NOPULL, NRF_GPIO_PIN_SENSE_LOW);
+    
+    return errorCode;
 }
