@@ -15,3 +15,6 @@
 /sdk/
 /tools/mergehex
 /tools/nrfjprog
+
+*.b#*
+*.s#*
