@@ -6,7 +6,7 @@
 <setting alwaysvectorfont="no"/>
 <setting verticaltext="up"/>
 </settings>
-<grid distance="0.1" unitdist="inch" unit="inch" style="lines" multiple="1" display="yes" altdistance="0.01" altunitdist="inch" altunit="inch"/>
+<grid distance="0.1" unitdist="inch" unit="inch" style="lines" multiple="1" display="no" altdistance="0.01" altunitdist="inch" altunit="inch"/>
 <layers>
 <layer number="1" name="Top" color="4" fill="1" visible="no" active="no"/>
 <layer number="16" name="Bottom" color="1" fill="1" visible="no" active="no"/>
@@ -2049,8 +2049,8 @@ Source: http://ww1.microchip.com/downloads/en/devicedoc/39632c.pdf</description>
 <pin name="GPA5" x="12.7" y="7.62" length="short" rot="R180"/>
 <pin name="GPA6" x="12.7" y="5.08" length="short" rot="R180"/>
 <pin name="GPA7" x="12.7" y="2.54" length="short" rot="R180"/>
-<pin name="VDD" x="-12.7" y="20.32" length="short" direction="pwr"/>
-<pin name="VSS" x="-12.7" y="-20.32" length="short" direction="pwr"/>
+<pin name="VDD" x="-12.7" y="20.32" length="short" direction="in"/>
+<pin name="VSS" x="-12.7" y="-20.32" length="short" direction="in"/>
 </symbol>
 <symbol name="KEYBOARD_2X13">
 <pin name="1" x="-10.16" y="15.24" length="middle"/>
@@ -6936,6 +6936,8 @@ Source: http://www.osram.convergy.de/</description>
 <classes>
 <class number="0" name="default" width="0" drill="0">
 </class>
+<class number="1" name="POWER" width="0" drill="0">
+</class>
 </classes>
 <parts>
 <part name="J1" library="SparkFun-Connectors" deviceset="M02" device="1X02_NO_SILK" value="BATTERY"/>
@@ -6995,7 +6997,7 @@ Source: http://www.osram.convergy.de/</description>
 <busses>
 </busses>
 <nets>
-<net name="VCC" class="0">
+<net name="VCC" class="1">
 <segment>
 <pinref part="J1" gate="G$1" pin="2"/>
 <pinref part="SUPPLY1" gate="G$1" pin="VCC"/>
@@ -7033,7 +7035,7 @@ Source: http://www.osram.convergy.de/</description>
 <junction x="198.12" y="91.44"/>
 </segment>
 </net>
-<net name="GND" class="0">
+<net name="GND" class="1">
 <segment>
 <pinref part="J1" gate="G$1" pin="1"/>
 <pinref part="GND1" gate="1" pin="GND"/>
@@ -7543,6 +7545,11 @@ Source: http://www.osram.convergy.de/</description>
 </nets>
 </sheet>
 </sheets>
+<errors>
+<approved hash="202,1,30.48,93.98,U1,SWDCLK,,,,"/>
+<approved hash="113,1,12.0227,33.2147,J2,,,,,"/>
+<approved hash="113,1,12.0227,19.2447,J3,,,,,"/>
+</errors>
 </schematic>
 </drawing>
 </eagle>
