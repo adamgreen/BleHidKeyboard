@@ -62,20 +62,24 @@
 #define KEYBOARD_MCP23018_1_I2C_ADDRESS 0x20
 #define KEYBOARD_MCP23018_2_I2C_ADDRESS 0x27
 
+// Configuration options for the interrupt driven UART driver.
+#define UART_TX_PIN      6
+#define UART_RX_PIN      12
+// CTS & RTS not actually used in this implementation.
+#define UART_CTS_PIN     0xFF
+#define UART_RTS_PIN     0xFF
+#define UART_TX_BUF_SIZE 256
+#define UART_RX_BUF_SIZE 1
+
+// nRF51 pins used for caps and num lock LEDs.
+#define CAPS_LOCK_PIN   0
+#define NUM_LOCK_PIN    24
+
 // Set to non-zero value to dump BLE HID reports.
 #define DEBUG_SHOW_HID_REPORT       1
 
 // Set to non-zero value if we want to remap keyboard to be special alphabetical order keyboard.
 #define KEYBOARD_IS_SPECIAL_ABC     1
-
-
-// Configuration options for the interrupt driven UART driver.
-#define UART_TX_BUF_SIZE 256
-#define UART_RX_BUF_SIZE 1
-#define UART_TX_PIN      6
-#define UART_RX_PIN      12
-#define UART_CTS_PIN     0xFF   // CTS & RTS not actually used in this implementation.
-#define UART_RTS_PIN     0xFF
 
 // BLE HID is based on USB HID. The keyboard communicates with 8-byte input reports and 1-byte output report.
 // Version number of base USB HID Specification implemented by this application.
@@ -228,6 +232,7 @@ static void initRtcTimers(void);
 static void handleBatteryLevelTimerEvent(void* pContext);
 static void updateBatteryLevel(void);
 static void keyboardTimerHandler(nrf_timer_event_t eventType, void* pvContext);
+static void initNumCapsLEDs();
 static void initBspLeds();
 static void handleBspEvent(bsp_event_t event);
 static void enterSleepMode(void);
@@ -263,12 +268,13 @@ static void enterLowPowerModeAndWakeOnEvent(void);
 
 int main(void)
 {
-    // UNDONE: I will use the keyboard matrix to figure this out by pressing something with spacebar on startup.
+    // UNDONE: I will use the keyboard matrix to figure this out by pressing Delete with spacebar on startup.
     bool     eraseBonds = false;
     uint32_t errorCode;
 
     initUart();
     initRtcTimers();
+    initNumCapsLEDs();
     initBspLeds();
     initBleStack();
     initScheduler();
@@ -373,6 +379,14 @@ static void updateBatteryLevel(void)
     {
         APP_ERROR_HANDLER(errorCode);
     }
+}
+
+static void initNumCapsLEDs()
+{
+    nrf_gpio_cfg_output(CAPS_LOCK_PIN);
+    nrf_gpio_cfg_output(NUM_LOCK_PIN);
+    nrf_gpio_pin_clear(CAPS_LOCK_PIN);
+    nrf_gpio_pin_clear(NUM_LOCK_PIN);
 }
 
 static void initBspLeds()
@@ -995,25 +1009,9 @@ static void handleHidOutputReportWrite(ble_hids_evt_t *p_evt)
 
 static void updateKeyboardLeds(uint8_t hidLedBitmask)
 {
-    // UNDONE: Need to light LEDs for this instead.
-#ifdef UNDONE
-    uint8_t ledCommand[] = { 0xED, 0x00 };
-
-    if (hidLedBitmask & HID_OUTPUT_REPORT_LED_NUM_LOCK)
-    {
-        ledCommand[1] |= 1 << 1;
-    }
-    if (hidLedBitmask & HID_OUTPUT_REPORT_LED_CAPS_LOCK)
-    {
-        ledCommand[1] |= 1 << 2;
-    }
-    if (hidLedBitmask & HID_OUTPUT_REPORT_LED_SCROLL_LOCK)
-    {
-        ledCommand[1] |= 1 << 0;
-    }
-
-    keyboardSendCommand(ledCommand, sizeof(ledCommand));
-#endif // UNDONE
+    // Note: We ignore scroll lock since its LED is used for BLE connection state instead.
+    nrf_gpio_pin_write(NUM_LOCK_PIN, hidLedBitmask & HID_OUTPUT_REPORT_LED_NUM_LOCK);
+    nrf_gpio_pin_write(CAPS_LOCK_PIN, hidLedBitmask & HID_OUTPUT_REPORT_LED_CAPS_LOCK);
 }
 
 static void handleServiceError(uint32_t errorCode)
