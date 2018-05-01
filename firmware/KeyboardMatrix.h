@@ -22,7 +22,7 @@
 
 
 // Type of function pointer called when keystate has changed (key pressed or released).
-typedef void (*keyStateCallback) (HidKeyboardInputReport* pReport, void* pvContext);
+typedef void (*keyStateCallback) (HidKeyboardInputReport* pReport, void* pvContext, bool sleepPressed);
 
 
 typedef struct KeyboardMatrix
@@ -34,8 +34,8 @@ typedef struct KeyboardMatrix
     uint32_t                scanInterval;
     uint32_t                interruptPin;
     uint8_t                 rowsRead[4];
+    uint8_t                 flags;
     bool                    scanningStarted;
-    bool                    overflowDetected;
     // Use two of the 16-bit I/O expanders for interfacing to the keyboard matrix.
     MCP23018                mcp23018_1;
     MCP23018                mcp23018_2;

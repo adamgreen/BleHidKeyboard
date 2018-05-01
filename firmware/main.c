@@ -261,7 +261,7 @@ static void initSensorSimulator(void);
 static void initConnectionParams(void);
 static void handleConnectionParamsError(uint32_t errorCode);
 static void startRtcTimers(void);
-static void sendInputReportHandler(HidKeyboardInputReport* pReportToSend, void* pvContext);
+static void sendInputReportHandler(HidKeyboardInputReport* pReportToSend, void* pvContext, bool sleepPressed);
 static void enterLowPowerModeAndWakeOnEvent(void);
 
 
@@ -431,9 +431,10 @@ static void handleBspEvent(bsp_event_t event)
 
 static void enterSleepMode(void)
 {
-    // UNDONE:
-    return;
-    
+    // Turn LEDs off to save power.
+    nrf_gpio_pin_clear(CAPS_LOCK_PIN);
+    nrf_gpio_pin_clear(NUM_LOCK_PIN);
+
     uint32_t errorCode = bsp_indication_set(BSP_INDICATE_IDLE);
     APP_ERROR_CHECK(errorCode);
 
@@ -1063,10 +1064,15 @@ static void startRtcTimers(void)
     APP_ERROR_CHECK(errorCode);
 }
 
-static void sendInputReportHandler(HidKeyboardInputReport* pReportToSend, void* pvContext)
+static void sendInputReportHandler(HidKeyboardInputReport* pReportToSend, void* pvContext, bool sleepPressed)
 {
     uint32_t errorCode;
 
+    if (sleepPressed)
+    {
+        enterSleepMode();
+    }
+    
     if (DEBUG_SHOW_HID_REPORT)
     {
         printf("{%02X, %02X, %02X, %02X, %02X, %02X, %02X, %02X}\n",

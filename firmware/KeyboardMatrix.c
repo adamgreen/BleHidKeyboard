@@ -20,6 +20,15 @@
 #include "KeyMappings.h"
 
 
+#define COLUMN_COUNT (sizeof(g_columnMappings)/sizeof(g_columnMappings[0]))
+#define SCAN_STEPS   ((COLUMN_COUNT) * 2)
+
+// Flag bits
+#define FLAG_OVERFLOW_DETECTED (1 << 0)
+#define FLAG_FN_DETECTED       (1 << 1)
+#define FLAG_F1_DETECTED       (1 << 2)
+
+
 static void scanKeyboardMatrixCallback(void* pContext);
 static void updateKeyboardInputReport(KeyboardMatrix* pThis, HidKeyboardUsageValues key);
 
@@ -88,9 +97,6 @@ uint32_t kbmatrixInit(KeyboardMatrix* pThis,
     return errorCode;
 }
 
-// UNDONE: Move these constants
-#define COLUMN_COUNT (sizeof(g_columnMappings)/sizeof(g_columnMappings[0]))
-#define SCAN_STEPS   ((COLUMN_COUNT) * 2)
 
 static void scanKeyboardMatrixCallback(void* pContext)
 {
@@ -170,16 +176,18 @@ static void scanKeyboardMatrixCallback(void* pContext)
     // At the beginning of a pass, finalize the previous scan results and prepare to fill in the report for this scan.
     if (pThis->scanStep == 0 && pThis->scanningStarted)
     {
-        if (pThis->overflowDetected)
+        bool sleepPressed = (pThis->flags & (FLAG_FN_DETECTED | FLAG_F1_DETECTED)) == (FLAG_FN_DETECTED | FLAG_F1_DETECTED);
+        
+        if (pThis->flags & FLAG_OVERFLOW_DETECTED)
         {
             // Set all keys to overflow error if more than 6 keys were pressed at once.
             memcpy(pThis->reportCurr.keyArray, overflowKeyArray, sizeof(pThis->reportCurr.keyArray));
         }
 
-        if (0 != memcmp(&pThis->reportPrev, &pThis->reportCurr, sizeof(pThis->reportPrev)))
+        if (sleepPressed || 0 != memcmp(&pThis->reportPrev, &pThis->reportCurr, sizeof(pThis->reportPrev)))
         {
             // Key state has changed since the last scan so it should be sent to host via callback.
-            pThis->pCallback(&pThis->reportCurr, pThis->pvContext);
+            pThis->pCallback(&pThis->reportCurr, pThis->pvContext, sleepPressed);
         }
 
         // Remember the current report in prevPrev.
@@ -187,7 +195,7 @@ static void scanKeyboardMatrixCallback(void* pContext)
         
         // Initialize reportCurr to be filled in with this scan's results.
         memset(&pThis->reportCurr, 0, sizeof(pThis->reportCurr));
-        pThis->overflowDetected = false;
+        pThis->flags = 0;
     }
 
     pThis->scanningStarted = true;
@@ -202,10 +210,21 @@ static void updateKeyboardInputReport(KeyboardMatrix* pThis, HidKeyboardUsageVal
     size_t i;
 
     // UNDONE: Add special handling for FN key as necessary.
-    if (key == 0x00 || key == 0xFF)
+    if (key == HID_KEY_NOEVENT)
     {
         // Key doesn't have recognized HID code so just return.
         return;
+    }
+    if (key == HID_KEY_FN)
+    {
+        // Just record that we saw the FN key and return.
+        pThis->flags |= FLAG_FN_DETECTED;
+        return;
+    }
+    if (key == HID_KEY_F1)
+    {
+        // Remember that we saw the F1 (Sleep) key pressed.
+        pThis->flags |= FLAG_F1_DETECTED;
     }
 
     // Some usage values are stored in keyArray of input report and other are bits in modifierBitmask.
@@ -230,7 +249,7 @@ static void updateKeyboardInputReport(KeyboardMatrix* pThis, HidKeyboardUsageVal
         // Detect and flag if overflow of keyArray has occurred. Overflow error will be sent to host at end of scan
         // cycle if this flag is set.
         if (i == length)
-            pThis->overflowDetected = true;
+            pThis->flags |= FLAG_OVERFLOW_DETECTED;
     }
 }
 
