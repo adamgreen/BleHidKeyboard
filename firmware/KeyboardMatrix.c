@@ -31,6 +31,7 @@
 
 static void scanKeyboardMatrixCallback(void* pContext);
 static void updateKeyboardInputReport(KeyboardMatrix* pThis, HidKeyboardUsageValues key);
+static bool scanKeyboardForDeleteKey(KeyboardMatrix* pThis);
 static bool findSpacebar(KeyboardMatrix* pThis);
 
 
@@ -39,7 +40,8 @@ uint32_t kbmatrixInit(KeyboardMatrix* pThis,
                       uint32_t sclPin, uint32_t sdaPin,
                       uint32_t intA1Pin, uint32_t intB1Pin, uint32_t intA2Pin, uint32_t intB2Pin,
                       uint32_t timerPrescaler,
-                      keyStateCallback pCallback, void* pvContext)
+                      keyStateCallback pCallback, void* pvContext,
+                      bool* pIsDeletePressed)
 {
     // We want to be able to queue up 2 writes (direction and GPIO set) + 1 read for each of the 2 MCP23018.
     const uint8_t i2cQueueSize = 2 * 3;
@@ -87,17 +89,11 @@ uint32_t kbmatrixInit(KeyboardMatrix* pThis,
     errorCode = mcp23018SetGpioPullUps(&pThis->mcp23018_2, 0xFF, 0xFF);
     APP_ERROR_CHECK(errorCode);
 
-    // Start scanning timer.
-    pThis->timerId = &pThis->timerData;
-    errorCode = app_timer_create(&pThis->timerId,
-                                APP_TIMER_MODE_SINGLE_SHOT,
-                                scanKeyboardMatrixCallback);
-    APP_ERROR_CHECK(errorCode);
+    // Run a keyboard scan pass to see if delete is pressed during startup.
+    *pIsDeletePressed = scanKeyboardForDeleteKey(pThis);
 
     // NOTE: APP_TIMER_TICKS results in 64-bit math.
     pThis->scanInterval = APP_TIMER_TICKS(2, timerPrescaler);
-    errorCode = app_timer_start(pThis->timerId, pThis->scanInterval, pThis);
-    APP_ERROR_CHECK(errorCode);
 
     return errorCode;
 }
@@ -258,11 +254,79 @@ static void updateKeyboardInputReport(KeyboardMatrix* pThis, HidKeyboardUsageVal
     }
 }
 
+static bool scanKeyboardForDeleteKey(KeyboardMatrix* pThis)
+{
+    uint32_t columnBitmask = 0;
+    uint32_t rowBitmask = 0;
+    uint32_t errorCode = 0;
+
+    for (size_t column = 0 ; column < COLUMN_COUNT ; column++)
+    {
+        uint8_t rowCount = g_columnMappings[column].count;
+        const RowMapping* pMappings = g_columnMappings[column].pMappings;
+        for (int row = 0 ; row <  rowCount ; row++)
+        {
+            if (pMappings[row].usage == HID_KEY_DELETE)
+            {
+                columnBitmask = g_columnMappings[column].bitmask;
+                rowBitmask = pMappings[row].bitmask;
+            }
+        }
+    }
+    if (columnBitmask == 0 || rowBitmask == 0)
+        return false;
+
+    // Pull the delete key column pin low.
+    errorCode =  mcp23018AsyncSetOutputAndPullLow(&pThis->mcp23018_1, columnBitmask & 0xFF, (columnBitmask >> 8) & 0xFF);
+    APP_ERROR_CHECK(errorCode);
+    errorCode =  mcp23018AsyncSetOutputAndPullLow(&pThis->mcp23018_2, (columnBitmask >> 16) & 0xFF, (columnBitmask >> 24) & 0xFF);
+    APP_ERROR_CHECK(errorCode);
+
+    // Issue the read on the row pin to see if it is low too.
+    errorCode = mcp23018AsyncGetGpio(&pThis->mcp23018_1, &pThis->rowsRead[0], &pThis->rowsRead[1]);
+    APP_ERROR_CHECK(errorCode);
+    errorCode = mcp23018AsyncGetGpio(&pThis->mcp23018_2, &pThis->rowsRead[2], &pThis->rowsRead[3]);
+    APP_ERROR_CHECK(errorCode);
+
+    // Wait for writes & reads to complete.
+    while (!mcp23018HasAsyncSetCompleted(&pThis->mcp23018_1) || !mcp23018HasAsyncSetCompleted(&pThis->mcp23018_2))
+    {
+    }
+
+    // The read has completed so see if the delete row is now pulled low.
+    uint32_t rowsPressed = ((uint32_t)(pThis->rowsRead[0] ^ 0xFF) << 0)|
+                           ((uint32_t)(pThis->rowsRead[1] ^ 0xFF) << 8) |
+                           ((uint32_t)(pThis->rowsRead[2] ^ 0xFF) << 16) |
+                           ((uint32_t)(pThis->rowsRead[3] ^ 0xFF) << 24);
+    if (rowsPressed & rowBitmask)
+    {
+        return true;
+    }
+    return false;
+}
+
 void kbmatrixUninit(KeyboardMatrix* pThis)
 {
     ASSERT ( pThis );
 
     i2cUninit();
+}
+
+uint32_t kbmatrixStart(KeyboardMatrix* pThis)
+{
+    uint32_t errorCode;
+    
+    // Start scanning timer.
+    pThis->timerId = &pThis->timerData;
+    errorCode = app_timer_create(&pThis->timerId,
+                                APP_TIMER_MODE_SINGLE_SHOT,
+                                scanKeyboardMatrixCallback);
+    APP_ERROR_CHECK(errorCode);
+
+    errorCode = app_timer_start(pThis->timerId, pThis->scanInterval, pThis);
+    APP_ERROR_CHECK(errorCode);
+
+    return errorCode;
 }
 
 uint32_t kbmatrixConfigureForWakeupOnSpacebar(KeyboardMatrix* pThis)

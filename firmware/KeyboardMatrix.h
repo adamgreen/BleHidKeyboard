@@ -56,9 +56,11 @@ uint32_t kbmatrixInit(KeyboardMatrix* pThis,
                       uint32_t sclPin, uint32_t sdaPin, 
                       uint32_t intA1Pin, uint32_t intB1Pin, uint32_t intA2Pin, uint32_t intB2Pin,
                       uint32_t timerPrescaler,
-                      keyStateCallback pCallback, void* pvContext);
+                      keyStateCallback pCallback, void* pvContext,
+                      bool* pIsDeletePressed);
 void     kbmatrixUninit(KeyboardMatrix* pThis);
 
+uint32_t kbmatrixStart(KeyboardMatrix* pThis);
 uint32_t kbmatrixConfigureForWakeupOnSpacebar(KeyboardMatrix* pThis);
 
 #endif // KEYBOARD_MATRIX_H__

@@ -271,12 +271,19 @@ static void enterLowPowerModeAndWakeOnEvent(void);
 
 int main(void)
 {
-    // UNDONE: I will use the keyboard matrix to figure this out by pressing Delete with spacebar on startup.
     bool     eraseBonds = false;
     uint32_t errorCode;
 
     initUart();
     initRtcTimers();
+    errorCode = kbmatrixInit(&g_keyboardMatrix,
+                             KEYBOARD_MCP23018_1_I2C_ADDRESS, KEYBOARD_MCP23018_2_I2C_ADDRESS,
+                             KEYBOARD_SCL_PIN, KEYBOARD_SDA_PIN, 
+                             KEYBOARD_INTA1_PIN, KEYBOARD_INTB1_PIN, KEYBOARD_INTA2_PIN, KEYBOARD_INTB2_PIN,
+                             APP_TIMER_PRESCALER,
+                             sendInputReportHandler, NULL,
+                             &eraseBonds);
+    APP_ERROR_CHECK(errorCode);
     initNumCapsLEDs();
     initBspLeds();
     initBleStack();
@@ -293,13 +300,9 @@ int main(void)
     errorCode = ble_advertising_start(BLE_ADV_MODE_FAST);
     APP_ERROR_CHECK(errorCode);
 
-    errorCode = kbmatrixInit(&g_keyboardMatrix,
-                             KEYBOARD_MCP23018_1_I2C_ADDRESS, KEYBOARD_MCP23018_2_I2C_ADDRESS,
-                             KEYBOARD_SCL_PIN, KEYBOARD_SDA_PIN, 
-                             KEYBOARD_INTA1_PIN, KEYBOARD_INTB1_PIN, KEYBOARD_INTA2_PIN, KEYBOARD_INTB2_PIN,
-                             APP_TIMER_PRESCALER,
-                             sendInputReportHandler, NULL);
-
+    errorCode = kbmatrixStart(&g_keyboardMatrix);
+    APP_ERROR_CHECK(errorCode);
+    
     // Sleep until a new event occurs and then check the scheduler to execute any queued operations.
     while (1)
     {
