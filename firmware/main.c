@@ -54,8 +54,11 @@
 #define KEYBOARD_SCL_PIN                15
 #define KEYBOARD_SDA_PIN                5
 
-// This will be the INTA or INTB pin of the MCP23018 I/O expander which corresponds to the row of the spacebar key.
-#define KEYBOARD_INTERRUPT_PIN          8
+// The INTA & INTB pins for each of the MCP23018 devices.
+#define KEYBOARD_INTA1_PIN              3
+#define KEYBOARD_INTB1_PIN              8
+#define KEYBOARD_INTA2_PIN              11
+#define KEYBOARD_INTB2_PIN              21
 
 // There are two MCP23018 16-bit I/O expanders used to connect to all of the columns and rows of the keyboard matrix.
 // The following defines provide the I2C addresss of these two MCP23018 expanders.
@@ -292,7 +295,8 @@ int main(void)
 
     errorCode = kbmatrixInit(&g_keyboardMatrix,
                              KEYBOARD_MCP23018_1_I2C_ADDRESS, KEYBOARD_MCP23018_2_I2C_ADDRESS,
-                             KEYBOARD_SCL_PIN, KEYBOARD_SDA_PIN, KEYBOARD_INTERRUPT_PIN,
+                             KEYBOARD_SCL_PIN, KEYBOARD_SDA_PIN, 
+                             KEYBOARD_INTA1_PIN, KEYBOARD_INTB1_PIN, KEYBOARD_INTA2_PIN, KEYBOARD_INTB2_PIN,
                              APP_TIMER_PRESCALER,
                              sendInputReportHandler, NULL);
 

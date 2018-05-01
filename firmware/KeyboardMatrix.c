@@ -31,11 +31,13 @@
 
 static void scanKeyboardMatrixCallback(void* pContext);
 static void updateKeyboardInputReport(KeyboardMatrix* pThis, HidKeyboardUsageValues key);
+static bool findSpacebar(KeyboardMatrix* pThis);
 
 
 uint32_t kbmatrixInit(KeyboardMatrix* pThis,
                       uint8_t i2cAddress1, uint8_t i2cAddress2, 
-                      uint32_t sclPin, uint32_t sdaPin, uint32_t interruptPin,
+                      uint32_t sclPin, uint32_t sdaPin,
+                      uint32_t intA1Pin, uint32_t intB1Pin, uint32_t intA2Pin, uint32_t intB2Pin,
                       uint32_t timerPrescaler,
                       keyStateCallback pCallback, void* pvContext)
 {
@@ -48,7 +50,10 @@ uint32_t kbmatrixInit(KeyboardMatrix* pThis,
     memset(pThis, 0, sizeof(*pThis));
     pThis->pCallback = pCallback;
     pThis->pvContext = pvContext;
-    pThis->interruptPin = interruptPin;
+    pThis->intA1Pin = intA1Pin;
+    pThis->intB1Pin = intB1Pin;
+    pThis->intA2Pin = intA2Pin;
+    pThis->intB2Pin = intB2Pin;
 
     uint32_t errorCode = i2cInit(sclPin, sdaPin, i2cQueueSize);
     APP_ERROR_CHECK(errorCode);
@@ -260,23 +265,75 @@ void kbmatrixUninit(KeyboardMatrix* pThis)
     i2cUninit();
 }
 
-// UNDONE: Customize this for my keyboard.
 uint32_t kbmatrixConfigureForWakeupOnSpacebar(KeyboardMatrix* pThis)
 {
-    // Configure INTB to go low when the spacebar's row goes low.
-    uint32_t errorCode = mcp23018SetDefaultValues(&pThis->mcp23018_1, 0x00, 0x02);
+    if (!findSpacebar(pThis))
+        return NRF_ERROR_NOT_FOUND;
+        
+    // Enable interrupt to go low when the spacebar's row goes low.
+    uint32_t rowBitmask = pThis->spacebarRowBitmask;
+
+    uint32_t errorCode = mcp23018SetDefaultValues(&pThis->mcp23018_1, rowBitmask & 0xff, (rowBitmask >> 8) & 0xFF);
     APP_ERROR_CHECK(errorCode);
-    errorCode = mcp23018SetInterruptControlValues(&pThis->mcp23018_1, 0x00, 0x02);
+    errorCode = mcp23018SetDefaultValues(&pThis->mcp23018_2, (rowBitmask >> 16) & 0xff, (rowBitmask >> 24) & 0xFF);
     APP_ERROR_CHECK(errorCode);
-    errorCode = mcp23018SetGpioInterruptEnables(&pThis->mcp23018_1, 0x00, 0x02);
+
+    errorCode = mcp23018SetInterruptControlValues(&pThis->mcp23018_1, rowBitmask & 0xff, (rowBitmask >> 8) & 0xFF);
+    APP_ERROR_CHECK(errorCode);
+    errorCode = mcp23018SetInterruptControlValues(&pThis->mcp23018_2, (rowBitmask >> 16) & 0xff, (rowBitmask >> 24) & 0xFF);
+    APP_ERROR_CHECK(errorCode);
+
+    errorCode = mcp23018SetGpioInterruptEnables(&pThis->mcp23018_1, rowBitmask & 0xff, (rowBitmask >> 8) & 0xFF);
+    APP_ERROR_CHECK(errorCode);
+    errorCode = mcp23018SetGpioInterruptEnables(&pThis->mcp23018_2, (rowBitmask >> 16) & 0xff, (rowBitmask >> 24) & 0xFF);
     APP_ERROR_CHECK(errorCode);
 
     // Pull the spacebar's column low so that its row will go low when the spacebar is pressed, triggering interrupt.
-    errorCode = mcp23018AsyncSetGpio(&pThis->mcp23018_1, ~1, 0x00);
+    uint32_t colBitmask = pThis->spacebarColumnBitmask;
+    errorCode =  mcp23018AsyncSetOutputAndPullLow(&pThis->mcp23018_1, colBitmask & 0xFF, (colBitmask >> 8) & 0xFF);
     APP_ERROR_CHECK(errorCode);
+    errorCode =  mcp23018AsyncSetOutputAndPullLow(&pThis->mcp23018_2, (colBitmask >> 16) & 0xFF, (colBitmask >> 24) & 0xFF);
+    APP_ERROR_CHECK(errorCode);
+    while (!mcp23018HasAsyncSetCompleted(&pThis->mcp23018_1) || !mcp23018HasAsyncSetCompleted(&pThis->mcp23018_2))
+    {
+    }
 
-    // Configure the INTB pin to be a sense/wakeup source.
-    nrf_gpio_cfg_sense_input(pThis->interruptPin, NRF_GPIO_PIN_NOPULL, NRF_GPIO_PIN_SENSE_LOW);
+    // Configure the appropriate INTA/B pin to be a sense/wakeup source.
+    nrf_gpio_cfg_sense_input(pThis->spacebarInterruptPin, NRF_GPIO_PIN_NOPULL, NRF_GPIO_PIN_SENSE_LOW);
     
     return errorCode;
+}
+
+static bool findSpacebar(KeyboardMatrix* pThis)
+{
+    // Just return if we already found the space bar.
+    if (pThis->spacebarRowBitmask != 0 && pThis->spacebarColumnBitmask != 0)
+        return true;
+
+    for (size_t column = 0 ; column < COLUMN_COUNT ; column++)
+    {
+        uint8_t rowCount = g_columnMappings[column].count;
+        const RowMapping* pMappings = g_columnMappings[column].pMappings;
+        for (int row = 0 ; row <  rowCount ; row++)
+        {
+            if (pMappings[row].usage == HID_KEY_SPACEBAR)
+            {
+                pThis->spacebarColumnBitmask = g_columnMappings[column].bitmask;
+                pThis->spacebarRowBitmask = pMappings[row].bitmask;
+
+                if (pThis->spacebarRowBitmask & 0xFF)
+                    pThis->spacebarInterruptPin = pThis->intA1Pin;
+                else if (pThis->spacebarRowBitmask & 0xFF00)
+                    pThis->spacebarInterruptPin = pThis->intB1Pin;
+                else if (pThis->spacebarRowBitmask & 0xFF0000)
+                    pThis->spacebarInterruptPin = pThis->intA2Pin;
+                else
+                    pThis->spacebarInterruptPin = pThis->intB2Pin;
+                
+                return true;
+            }
+        }
+    }
+
+    return false;
 }

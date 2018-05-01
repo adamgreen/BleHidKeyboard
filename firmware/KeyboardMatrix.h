@@ -32,7 +32,13 @@ typedef struct KeyboardMatrix
     app_timer_id_t          timerId;
     uint32_t                scanStep;
     uint32_t                scanInterval;
-    uint32_t                interruptPin;
+    uint32_t                intA1Pin;
+    uint32_t                intB1Pin;
+    uint32_t                intA2Pin;
+    uint32_t                intB2Pin;
+    uint32_t                spacebarInterruptPin;
+    uint32_t                spacebarColumnBitmask;
+    uint32_t                spacebarRowBitmask;
     uint8_t                 rowsRead[4];
     uint8_t                 flags;
     bool                    scanningStarted;
@@ -47,7 +53,8 @@ typedef struct KeyboardMatrix
 
 uint32_t kbmatrixInit(KeyboardMatrix* pThis,
                       uint8_t i2cAddress1, uint8_t i2cAddress2, 
-                      uint32_t sclPin, uint32_t sdaPin, uint32_t interruptPin,
+                      uint32_t sclPin, uint32_t sdaPin, 
+                      uint32_t intA1Pin, uint32_t intB1Pin, uint32_t intA2Pin, uint32_t intB2Pin,
                       uint32_t timerPrescaler,
                       keyStateCallback pCallback, void* pvContext);
 void     kbmatrixUninit(KeyboardMatrix* pThis);
