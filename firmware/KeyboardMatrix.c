@@ -30,6 +30,9 @@ uint32_t kbmatrixInit(KeyboardMatrix* pThis,
                       uint32_t timerPrescaler,
                       keyStateCallback pCallback, void* pvContext)
 {
+    // We want to be able to queue up 2 writes (direction and GPIO set) + 1 read for each of the 2 MCP23018.
+    const uint8_t i2cQueueSize = 2 * 3;
+    
     ASSERT ( pThis );
     ASSERT ( pCallback );
 
@@ -38,7 +41,7 @@ uint32_t kbmatrixInit(KeyboardMatrix* pThis,
     pThis->pvContext = pvContext;
     pThis->interruptPin = interruptPin;
 
-    uint32_t errorCode = i2cInit(sclPin, sdaPin);
+    uint32_t errorCode = i2cInit(sclPin, sdaPin, i2cQueueSize);
     APP_ERROR_CHECK(errorCode);
 
     // Initialize both MCP23018 port extender devices.
@@ -154,20 +157,13 @@ static void scanKeyboardMatrixCallback(void* pContext)
             }
         }
 
-        // Pull one of the column outputs low in this step.
-        uint32_t bitmask = g_columnMappings[column].bitmask;
-
-        // UNDONE: This should be done async as well. I could add a method to MCP23018 that does both in one I2C transaction.
         // Only the current column should be output (direction bit == 0) and the rest should be inputs.
-        errorCode =  mcp23018SetIoDirections(&pThis->mcp23018_1, bitmask & 0xFF, (bitmask >> 8) & 0xFF);
-        APP_ERROR_CHECK(errorCode);
-        errorCode =  mcp23018SetIoDirections(&pThis->mcp23018_2, (bitmask >> 16) & 0xFF, (bitmask >> 24) & 0xFF);
-        APP_ERROR_CHECK(errorCode);
-
         // Set the current column to 0 and leave all of the inputs as 1.
-        errorCode = mcp23018AsyncSetGpio(&pThis->mcp23018_1, bitmask & 0xFF, (bitmask >> 8) & 0xFF);
+        // Both of these operations will be done in one transaction via the MCP23018 object.
+        uint32_t bitmask = g_columnMappings[column].bitmask;
+        errorCode =  mcp23018AsyncSetOutputAndPullLow(&pThis->mcp23018_1, bitmask & 0xFF, (bitmask >> 8) & 0xFF);
         APP_ERROR_CHECK(errorCode);
-        errorCode = mcp23018AsyncSetGpio(&pThis->mcp23018_2, (bitmask >> 16) & 0xFF, (bitmask >> 24) & 0xFF);
+        errorCode =  mcp23018AsyncSetOutputAndPullLow(&pThis->mcp23018_2, (bitmask >> 16) & 0xFF, (bitmask >> 24) & 0xFF);
         APP_ERROR_CHECK(errorCode);
     }
     

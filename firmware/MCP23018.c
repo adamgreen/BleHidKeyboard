@@ -14,6 +14,7 @@
 #include "MCP23018.h"
 #include <app_util_platform.h>
 #include <nrf_assert.h>
+#include <stdlib.h>
 #include <string.h>
 
 
@@ -55,12 +56,10 @@
 // Bank bit (0: The port A and port B registers are sequentially addressed: 1: They aren't sequential.)
 #define MCP23018_IOCON_BANK             (1 << 7)
 
-// This module only expects to have two I2C transaction in flight at a time.
-#define MCP23018_TWI_MAX_PENDING_TRANSACTIONS 2
 
-
-static app_twi_t g_twi = APP_TWI_INSTANCE(0);
-static  bool     g_hasInitCompleted = false;
+static app_twi_t                     g_twi = APP_TWI_INSTANCE(0);
+static const app_twi_transaction_t** g_ppI2cQueue = NULL;
+static bool                          g_hasInitCompleted = false;
 
 
 // Forward Declarations
@@ -68,7 +67,7 @@ static void gpioWriteCompletedCallback(ret_code_t result, void* pvContext);
 static void gpioReadCompletedCallback(ret_code_t result, void* pvContext);
 
 
-uint32_t i2cInit(uint32_t sclPin, uint32_t sdaPin)
+uint32_t i2cInit(uint32_t sclPin, uint32_t sdaPin, uint8_t transactionQueueSize)
 {
     nrf_drv_twi_config_t config =
     {
@@ -81,10 +80,18 @@ uint32_t i2cInit(uint32_t sclPin, uint32_t sdaPin)
 
     if (g_hasInitCompleted)
         return NRF_SUCCESS;
-        
-    APP_TWI_INIT(&g_twi, &config, MCP23018_TWI_MAX_PENDING_TRANSACTIONS, result);
+
+    g_ppI2cQueue = malloc(sizeof(app_twi_transaction_t*) * (transactionQueueSize + 1));
+    if (!g_ppI2cQueue)
+        return NRF_ERROR_NO_MEM;
+
+    result = app_twi_init(&g_twi, &config, transactionQueueSize, g_ppI2cQueue);
     if (result != NRF_SUCCESS)
+    {
+        free(g_ppI2cQueue);
+        g_ppI2cQueue = NULL;
         return result;
+    }
     g_hasInitCompleted = true;
 
     return NRF_SUCCESS;
@@ -93,7 +100,11 @@ uint32_t i2cInit(uint32_t sclPin, uint32_t sdaPin)
 void i2cUninit(void)
 {
     if (g_hasInitCompleted)
+    {
         app_twi_uninit(&g_twi);
+        free(g_ppI2cQueue);
+        g_ppI2cQueue = NULL;
+    }
 }
 
 uint32_t mcp23018Init(MCP23018* pThis, uint8_t i2cAddress)
@@ -232,14 +243,14 @@ uint32_t mcp23018AsyncSetGpio(MCP23018* pThis, uint8_t portA, uint8_t portB)
     pThis->gpioWrite[1] = portA;
     pThis->gpioWrite[2] = portB;
 
-    pThis->writeTransfer.p_data    = pThis->gpioWrite;
-    pThis->writeTransfer.length    = sizeof(pThis->gpioWrite);
-    pThis->writeTransfer.operation = APP_TWI_WRITE_OP(pThis->i2cAddress);
-    pThis->writeTransfer.flags     = 0;
+    pThis->writeTransfers[0].p_data    = pThis->gpioWrite;
+    pThis->writeTransfers[0].length    = sizeof(pThis->gpioWrite);
+    pThis->writeTransfers[0].operation = APP_TWI_WRITE_OP(pThis->i2cAddress);
+    pThis->writeTransfers[0].flags     = 0;
 
     pThis->writeTransaction.callback            = gpioWriteCompletedCallback;
     pThis->writeTransaction.p_user_data         = pThis;
-    pThis->writeTransaction.p_transfers         = &pThis->writeTransfer;
+    pThis->writeTransaction.p_transfers         = pThis->writeTransfers;
     pThis->writeTransaction.number_of_transfers = 1;
 
     pThis->writeInProgress = true;
@@ -252,6 +263,45 @@ static void gpioWriteCompletedCallback(ret_code_t result, void* pvContext)
 
     ASSERT ( pThis );
     pThis->writeInProgress = false;
+}
+
+uint32_t mcp23018AsyncSetOutputAndPullLow(MCP23018* pThis, uint8_t portAMask, uint8_t portBMask)
+{
+    ASSERT ( pThis );
+
+    if (pThis->writeInProgress)
+        return NRF_ERROR_BUSY;
+
+    // The passed in masks have the 0 bit set for which pin should be made an output and then pulled low. All other
+    // bits will be 1.
+    
+    // Uses sequential writes to BANK0 to write both ports at once.
+    pThis->setIoDirection[0] = MCP23018_IODIRA_REGISTER;
+    pThis->setIoDirection[1] = portAMask;
+    pThis->setIoDirection[2] = portBMask;
+
+    pThis->writeTransfers[0].p_data    = pThis->setIoDirection;
+    pThis->writeTransfers[0].length    = sizeof(pThis->setIoDirection);
+    pThis->writeTransfers[0].operation = APP_TWI_WRITE_OP(pThis->i2cAddress);
+    pThis->writeTransfers[0].flags     = 0;
+
+    // Uses sequential writes to BANK0 to write both ports at once.
+    pThis->gpioWrite[0] = MCP23018_GPIOA_REGISTER;
+    pThis->gpioWrite[1] = portAMask;
+    pThis->gpioWrite[2] = portBMask;
+
+    pThis->writeTransfers[1].p_data    = pThis->gpioWrite;
+    pThis->writeTransfers[1].length    = sizeof(pThis->gpioWrite);
+    pThis->writeTransfers[1].operation = APP_TWI_WRITE_OP(pThis->i2cAddress);
+    pThis->writeTransfers[1].flags     = 0;
+
+    pThis->writeTransaction.callback            = gpioWriteCompletedCallback;
+    pThis->writeTransaction.p_user_data         = pThis;
+    pThis->writeTransaction.p_transfers         = pThis->writeTransfers;
+    pThis->writeTransaction.number_of_transfers = 2;
+
+    pThis->writeInProgress = true;
+    return app_twi_schedule(&g_twi, &pThis->writeTransaction);
 }
 
 uint32_t mcp23018AsyncGetGpio(MCP23018* pThis, uint8_t* pPortA, uint8_t* pPortB)
