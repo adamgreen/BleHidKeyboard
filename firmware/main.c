@@ -36,7 +36,6 @@
 #include <ble_conn_params.h>
 #include <bsp.h>
 #include <sensorsim.h>
-#include <bsp_btn_ble.h>
 #include <app_scheduler.h>
 #include <softdevice_handler_appsh.h>
 #include <app_timer_appsh.h>
@@ -52,11 +51,11 @@
 
 
 // nRF51 pins connected to the I2C pins on the MCP23018 I/O expanders used with the keyboard matrix.
-#define KEYBOARD_SCL_PIN                1
-#define KEYBOARD_SDA_PIN                2
+#define KEYBOARD_SCL_PIN                15
+#define KEYBOARD_SDA_PIN                5
 
 // This will be the INTA or INTB pin of the MCP23018 I/O expander which corresponds to the row of the spacebar key.
-#define KEYBOARD_INTERRUPT_PIN          3
+#define KEYBOARD_INTERRUPT_PIN          8
 
 // There are two MCP23018 16-bit I/O expanders used to connect to all of the columns and rows of the keyboard matrix.
 // The following defines provide the I2C addresss of these two MCP23018 expanders.
@@ -73,6 +72,10 @@
 // Configuration options for the interrupt driven UART driver.
 #define UART_TX_BUF_SIZE 256
 #define UART_RX_BUF_SIZE 1
+#define UART_TX_PIN      6
+#define UART_RX_PIN      12
+#define UART_CTS_PIN     0xFF   // CTS & RTS not actually used in this implementation.
+#define UART_RTS_PIN     0xFF
 
 // BLE HID is based on USB HID. The keyboard communicates with 8-byte input reports and 1-byte output report.
 // Version number of base USB HID Specification implemented by this application.
@@ -101,20 +104,6 @@
     #define ALPHA_HID_CODES  g_scanCodesToHidQWERTY
 #endif
 
-
-// The default BSP setup requires 2 buttons.
-// During advertising or scanning:
-//  Button 1: Sleep (if not also in a connection)
-//  Button 2 long push: Turn off whitelist.
-// During sleep:
-//  Button 1: Wake up.
-//  Button 2: Wake up and delete bond information.
-// During connection:
-//  Button 1 long push: Disconnect.
-//  Push and release on all buttons: Application-specific.
-#if BUTTONS_NUMBER <2
-#error "Not enough resources on board"
-#endif
 
 // Include or not the service_changed characteristic. 
 // If not enabled, the server's database cannot be changed for the lifetime of the device.
@@ -239,7 +228,7 @@ static void initRtcTimers(void);
 static void handleBatteryLevelTimerEvent(void* pContext);
 static void updateBatteryLevel(void);
 static void keyboardTimerHandler(nrf_timer_event_t eventType, void* pvContext);
-static void initBspButtonAndLeds(bool * pEraseBonds);
+static void initBspLeds();
 static void handleBspEvent(bsp_event_t event);
 static void enterSleepMode(void);
 static void initBleStack(void);
@@ -274,12 +263,13 @@ static void enterLowPowerModeAndWakeOnEvent(void);
 
 int main(void)
 {
+    // UNDONE: I will use the keyboard matrix to figure this out by pressing something with spacebar on startup.
     bool     eraseBonds = false;
     uint32_t errorCode;
 
     initUart();
     initRtcTimers();
-    initBspButtonAndLeds(&eraseBonds);
+    initBspLeds();
     initBleStack();
     initScheduler();
     initDeviceManager(eraseBonds);
@@ -310,17 +300,18 @@ int main(void)
 
 static void initUart(void)
 {
-    uint32_t errorCode;
+    const bool noParity = false;
+    uint32_t   errorCode;
 
     const app_uart_comm_params_t comm_params =
     {
-        RX_PIN_NUMBER,
-        TX_PIN_NUMBER,
-        RTS_PIN_NUMBER,
-        CTS_PIN_NUMBER,
+        UART_RX_PIN,
+        UART_TX_PIN,
+        UART_RTS_PIN,
+        UART_CTS_PIN,
         APP_UART_FLOW_CONTROL_DISABLED,
-        false,
-        UART_BAUDRATE_BAUDRATE_Baud38400
+        noParity,
+        UART_BAUDRATE_BAUDRATE_Baud9600
     };
 
     APP_UART_FIFO_INIT(&comm_params,
@@ -329,8 +320,10 @@ static void initUart(void)
                        handleUartEvent,
                        APP_IRQ_PRIORITY_LOW,
                        errorCode);
-
     APP_ERROR_CHECK(errorCode);
+
+    // Pull-up the Rx pin since it is usually just left floating otherwise.
+    nrf_gpio_cfg_input(UART_RX_PIN, NRF_GPIO_PIN_PULLUP);
 }
 
 static void handleUartEvent(app_uart_evt_t* pEvent)
@@ -382,25 +375,19 @@ static void updateBatteryLevel(void)
     }
 }
 
-static void initBspButtonAndLeds(bool * pEraseBonds)
+static void initBspLeds()
 {
-    bsp_event_t startupEvent;
-
-    uint32_t errorCode = bsp_init(BSP_INIT_LED | BSP_INIT_BUTTONS,
+    uint32_t errorCode = bsp_init(BSP_INIT_LED,
                                   APP_TIMER_TICKS(100, APP_TIMER_PRESCALER),
                                   handleBspEvent);
     APP_ERROR_CHECK(errorCode);
-
-    errorCode = bsp_btn_ble_init(NULL, &startupEvent);
-    APP_ERROR_CHECK(errorCode);
-
-    *pEraseBonds = (startupEvent == BSP_EVENT_CLEAR_BONDING_DATA);
 }
 
 static void handleBspEvent(bsp_event_t event)
 {
     uint32_t errorCode;
 
+    // UNDONE: Should be done through keyboard key presses now.
     switch (event)
     {
         case BSP_EVENT_SLEEP:
@@ -430,12 +417,13 @@ static void handleBspEvent(bsp_event_t event)
 
 static void enterSleepMode(void)
 {
+    // UNDONE:
+    return;
+    
     uint32_t errorCode = bsp_indication_set(BSP_INDICATE_IDLE);
     APP_ERROR_CHECK(errorCode);
 
     // Prepare wakeup buttons.
-    errorCode = bsp_btn_ble_sleep_mode_prepare();
-    APP_ERROR_CHECK(errorCode);
     errorCode = kbmatrixConfigureForWakeupOnSpacebar(&g_keyboardMatrix);
     APP_ERROR_CHECK(errorCode);
     
@@ -449,7 +437,7 @@ static void initBleStack(void)
     uint32_t errorCode;
 
     // Initialize the SoftDevice handler module.
-    SOFTDEVICE_HANDLER_APPSH_INIT(NRF_CLOCK_LFCLKSRC_XTAL_20_PPM, true);
+    SOFTDEVICE_HANDLER_APPSH_INIT(NRF_CLOCK_LFCLKSRC_XTAL_50_PPM, true);
 
     // Enable BLE stack 
     ble_enable_params_t bleEnableParams;
@@ -473,7 +461,6 @@ static void initBleStack(void)
 static void handleBleEvent(ble_evt_t * pBleEvent)
 {
     dm_ble_evt_handler(pBleEvent);
-    bsp_btn_ble_on_ble_evt(pBleEvent);
     handleBleEventForApplication(pBleEvent);
     ble_advertising_on_ble_evt(pBleEvent);
     ble_conn_params_on_ble_evt(pBleEvent);

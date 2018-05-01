@@ -1,4 +1,4 @@
-/*  Copyright (C) 2017  Adam Green (https://github.com/adamgreen)
+/*  Copyright (C) 2018  Adam Green (https://github.com/adamgreen)
 
     This program is free software; you can redistribute it and/or
     modify it under the terms of the GNU General Public License
@@ -124,7 +124,8 @@ typedef enum HidKeyboardUsageValues
     HID_KEY_RIGHT_CONTROL = 0xE4,
     HID_KEY_RIGHT_SHIFT = 0xE5,
     HID_KEY_RIGHT_ALT = 0xE6,
-    HID_KEY_RIGHT_GUI = 0xE7
+    HID_KEY_RIGHT_GUI = 0xE7,
+    HID_KEY_FN = 0xFF // Special usage for the FN key on my particular keyboard.
 } HidKeyboardUsageValues;
 
 // Keyboard LED HID Usage Values.

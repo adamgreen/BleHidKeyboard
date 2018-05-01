@@ -112,6 +112,7 @@ INC_PATHS += -I$(abspath $(NRF51_SDK_PATH)/components/ble/ble_advertising)
 INC_PATHS += -I$(abspath $(NRF51_SDK_PATH)/components/libraries/trace)
 INC_PATHS += -I$(abspath $(NRF51_SDK_PATH)/components/ble/ble_services/ble_bas)
 INC_PATHS += -I$(abspath $(NRF51_SDK_PATH)/components/softdevice/common/softdevice_handler)
+INC_PATHS += -I$(abspath .)
 
 OUTPUT_DIRECTORY = _build
 CONFIG_DIRECTORY = config
@@ -126,7 +127,7 @@ SDK_URL = https://developer.nordicsemi.com/nRF5_SDK/nRF51_SDK_v10.x.x/$(SDK_ZIP)
 DEP_FLAGS := -MMD -MP
 
 #flags common to all targets
-CFLAGS  = -DBOARD_PCA10028
+CFLAGS  = -DBOARD_CUSTOM
 CFLAGS += -DSOFTDEVICE_PRESENT
 CFLAGS += -DNRF51
 CFLAGS += -DS110
@@ -156,7 +157,7 @@ LDFLAGS += --specs=nano.specs -lc -lnosys
 
 # Assembler flags
 ASMFLAGS += -x assembler-with-cpp
-ASMFLAGS += -DBOARD_PCA10028
+ASMFLAGS += -DBOARD_CUSTOM
 ASMFLAGS += -DSOFTDEVICE_PRESENT
 ASMFLAGS += -DNRF51
 ASMFLAGS += -DS110

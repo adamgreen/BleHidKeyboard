@@ -17,6 +17,7 @@
 #include <app_timer.h>
 #include <string.h>
 #include "KeyboardMatrix.h"
+#include "KeyMappings.h"
 
 
 static void scanKeyboardMatrixCallback(void* pContext);
@@ -40,8 +41,10 @@ uint32_t kbmatrixInit(KeyboardMatrix* pThis,
     uint32_t errorCode = i2cInit(sclPin, sdaPin);
     APP_ERROR_CHECK(errorCode);
 
-    // UNDONE: Need to initialize two MCP23018 devices.
+    // Initialize both MCP23018 port extender devices.
     errorCode = mcp23018Init(&pThis->mcp23018_1, i2cAddress1);
+    APP_ERROR_CHECK(errorCode);
+    errorCode = mcp23018Init(&pThis->mcp23018_2, i2cAddress2);
     APP_ERROR_CHECK(errorCode);
 
     bool interruptPinMirroringDisabled = false;
@@ -54,23 +57,17 @@ uint32_t kbmatrixInit(KeyboardMatrix* pThis,
                                            interruptActiveLow,
                                            interruptClearOnGPIORead);
     APP_ERROR_CHECK(errorCode);
-
-    // UNDONE: I think I will need a total of 6 row inputs in port B of the second MCP23018.
-    // Set all outputs to 1 before setting direction register.
-    errorCode = mcp23018AsyncSetGpio(&pThis->mcp23018_1, ~0x00, ~0x03);
-    APP_ERROR_CHECK(errorCode);
-    while (!mcp23018HasAsyncSetCompleted(&pThis->mcp23018_1))
-    {
-    }
-
-    // UNDONE: I think I will need a total of 6 row inputs in port B of the second MCP23018.
-    // PortA-0 pin is output and PortB-0 to PortB-1 are inputs. 
-    // Default all other pins to be outputs to conserve power.
-    errorCode =  mcp23018SetIoDirections(&pThis->mcp23018_1, 0x00, 0x03);
+    errorCode = mcp23018SetIoConfiguration(&pThis->mcp23018_2,
+                                           interruptPinMirroringDisabled,
+                                           interruptDrainOutputDisabled,
+                                           interruptActiveLow,
+                                           interruptClearOnGPIORead);
     APP_ERROR_CHECK(errorCode);
 
-    // Enable pull-up on the PortB input pins.
-    errorCode = mcp23018SetGpioPullUps(&pThis->mcp23018_1, 0x00, 0x03);
+    // Enable pull-up on all pins.
+    errorCode = mcp23018SetGpioPullUps(&pThis->mcp23018_1, 0xFF, 0xFF);
+    APP_ERROR_CHECK(errorCode);
+    errorCode = mcp23018SetGpioPullUps(&pThis->mcp23018_2, 0xFF, 0xFF);
     APP_ERROR_CHECK(errorCode);
 
     // Start scanning timer.
@@ -89,16 +86,8 @@ uint32_t kbmatrixInit(KeyboardMatrix* pThis,
 }
 
 // UNDONE: Move these constants
-#define COLUMN_COUNT 2
-#define ROW_COUNT    2
+#define COLUMN_COUNT (sizeof(g_columnMappings)/sizeof(g_columnMappings[0]))
 #define SCAN_STEPS   ((COLUMN_COUNT) * 2)
-#define ROW_BITMASK  ((1 << (ROW_COUNT)) - 1)
-
-static const HidKeyboardUsageValues g_keymap[COLUMN_COUNT][ROW_COUNT] =
-{
-    { HID_KEY_A,        HID_KEY_SPACEBAR },
-    { HID_KEY_PERIOD,   HID_KEY_PERIOD }
-};
 
 static void scanKeyboardMatrixCallback(void* pContext)
 {
@@ -118,7 +107,8 @@ static void scanKeyboardMatrixCallback(void* pContext)
     APP_ERROR_CHECK(errorCode);
 
     // Just skip this timer tick if the previous I/O hasn't completed yet and try again on the next one.
-    if (pThis->scanningStarted && !mcp23018HasAsyncSetCompleted(&pThis->mcp23018_1))
+    if (pThis->scanningStarted && (!mcp23018HasAsyncSetCompleted(&pThis->mcp23018_1) || 
+                                   !mcp23018HasAsyncSetCompleted(&pThis->mcp23018_2)))
     {
         return;
     }
@@ -127,41 +117,57 @@ static void scanKeyboardMatrixCallback(void* pContext)
     uint32_t readStep = pThis->scanStep & 1;
     if (readStep)
     {
-        // Read in row outputs from port B in this step.
-        errorCode = mcp23018AsyncGetGpio(&pThis->mcp23018_1, NULL, &pThis->rowsRead);
+        // Issue the async read for the row outputs in this step.
+        errorCode = mcp23018AsyncGetGpio(&pThis->mcp23018_1, &pThis->rowsRead[0], &pThis->rowsRead[1]);
+        APP_ERROR_CHECK(errorCode);
+        errorCode = mcp23018AsyncGetGpio(&pThis->mcp23018_2, &pThis->rowsRead[2], &pThis->rowsRead[3]);
         APP_ERROR_CHECK(errorCode);
     }
     else
     {
-        // The previous step's read should have completed so print it out.
-        uint8_t rowsPressed = (pThis->rowsRead ^ ROW_BITMASK) & ROW_BITMASK;
+        uint32_t lastColumnIndex;
+
+        // These rows were read when the previous column was pulled low and not the current row.
+        if (column == 0)
+            lastColumnIndex = COLUMN_COUNT - 1;
+        else
+            lastColumnIndex = column - 1;
+        uint32_t lastColumnMask = g_columnMappings[lastColumnIndex].bitmask;
+        
+        // The previous step's read has completed so process it.
+        uint32_t rowsPressed = ((uint32_t)(pThis->rowsRead[0] ^ 0xFF) << 0)|
+                               ((uint32_t)(pThis->rowsRead[1] ^ 0xFF) << 8) |
+                               ((uint32_t)(pThis->rowsRead[2] ^ 0xFF) << 16) |
+                               ((uint32_t)(pThis->rowsRead[3] ^ 0xFF) << 24);
+        // Clear the column just asserted low.
+        rowsPressed &= lastColumnMask;
         if (rowsPressed && pThis->scanningStarted)
         {
-            uint8_t  rowMask = 1;
-            uint32_t lastColumnRead;
-
-            // These rows were read when the previous column was pulled low and not the current row.
-            if (column == 0)
-                lastColumnRead = COLUMN_COUNT - 1;
-            else
-                lastColumnRead = column - 1;
-            for (int row = 0 ; row < ROW_COUNT ; row++)
+            uint8_t rowCount = g_columnMappings[lastColumnIndex].count;
+            const RowMapping* pMappings = g_columnMappings[lastColumnIndex].pMappings;
+            for (int row = 0 ; row <  rowCount ; row++)
             {
-                if (rowMask & rowsPressed)
+                if (rowsPressed & pMappings[row].bitmask)
                 {
-                    updateKeyboardInputReport(pThis, g_keymap[lastColumnRead][row]);
-
-                    // UNDONE: Need a way to turn this off and on.
-                    //printf("%lu-%u ", lastColumnRead, row);
+                    updateKeyboardInputReport(pThis, pMappings[row].usage);
                 }
-                rowMask <<= 1;
             }
-            //printf("\n");
         }
 
-        // Pull one of the column outputs low on port A in this step.
-        uint32_t bitmask = 0xFFFFFFFF & ~(1 << column);
-        errorCode = mcp23018AsyncSetGpio(&pThis->mcp23018_1, bitmask & 0xFF, 0x00);
+        // Pull one of the column outputs low in this step.
+        uint32_t bitmask = g_columnMappings[column].bitmask;
+
+        // UNDONE: This should be done async as well. I could add a method to MCP23018 that does both in one I2C transaction.
+        // Only the current column should be output (direction bit == 0) and the rest should be inputs.
+        errorCode =  mcp23018SetIoDirections(&pThis->mcp23018_1, bitmask & 0xFF, (bitmask >> 8) & 0xFF);
+        APP_ERROR_CHECK(errorCode);
+        errorCode =  mcp23018SetIoDirections(&pThis->mcp23018_2, (bitmask >> 16) & 0xFF, (bitmask >> 24) & 0xFF);
+        APP_ERROR_CHECK(errorCode);
+
+        // Set the current column to 0 and leave all of the inputs as 1.
+        errorCode = mcp23018AsyncSetGpio(&pThis->mcp23018_1, bitmask & 0xFF, (bitmask >> 8) & 0xFF);
+        APP_ERROR_CHECK(errorCode);
+        errorCode = mcp23018AsyncSetGpio(&pThis->mcp23018_2, (bitmask >> 16) & 0xFF, (bitmask >> 24) & 0xFF);
         APP_ERROR_CHECK(errorCode);
     }
     
@@ -199,7 +205,8 @@ static void updateKeyboardInputReport(KeyboardMatrix* pThis, HidKeyboardUsageVal
     const size_t length = sizeof(pThis->reportCurr.keyArray);
     size_t i;
 
-    if (key == 0x00)
+    // UNDONE: Add special handling for FN key as necessary.
+    if (key == 0x00 || key == 0xFF)
     {
         // Key doesn't have recognized HID code so just return.
         return;
@@ -238,6 +245,7 @@ void kbmatrixUninit(KeyboardMatrix* pThis)
     i2cUninit();
 }
 
+// UNDONE: Customize this for my keyboard.
 uint32_t kbmatrixConfigureForWakeupOnSpacebar(KeyboardMatrix* pThis)
 {
     // Configure INTB to go low when the spacebar's row goes low.

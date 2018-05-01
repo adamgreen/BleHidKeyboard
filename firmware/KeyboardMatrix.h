@@ -33,11 +33,12 @@ typedef struct KeyboardMatrix
     uint32_t                scanStep;
     uint32_t                scanInterval;
     uint32_t                interruptPin;
-    uint8_t                 rowsRead;
+    uint8_t                 rowsRead[4];
     bool                    scanningStarted;
     bool                    overflowDetected;
     // Use two of the 16-bit I/O expanders for interfacing to the keyboard matrix.
     MCP23018                mcp23018_1;
+    MCP23018                mcp23018_2;
     HidKeyboardInputReport  reportPrev;
     HidKeyboardInputReport  reportCurr;
     app_timer_t             timerData;
