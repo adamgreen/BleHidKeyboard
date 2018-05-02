@@ -146,14 +146,16 @@
 // The duration of the slow advertising period (in seconds).
 #define APP_ADV_SLOW_TIMEOUT             180
 
-// Minimum connection interval (7.5 ms).
-#define MIN_CONN_INTERVAL                MSEC_TO_UNITS(7.5, UNIT_1_25_MS)
-// Maximum connection interval (30 ms).
-#define MAX_CONN_INTERVAL                MSEC_TO_UNITS(30, UNIT_1_25_MS)
+// Based on a really fast typing rate of 1000 characters per minute = 16 characters per second.
+// A period of 62.6 milliseconds for 16Hz.
+// Minimum connection interval (62.6 ms).
+#define MIN_CONN_INTERVAL                MSEC_TO_UNITS(62.6, UNIT_1_25_MS)
+// Maximum connection interval (120 ms).
+#define MAX_CONN_INTERVAL                MSEC_TO_UNITS(120, UNIT_1_25_MS)
 // Slave latency.
-#define SLAVE_LATENCY                    6
-// Connection supervisory timeout (430 ms).
-#define CONN_SUP_TIMEOUT                 MSEC_TO_UNITS(430, UNIT_10_MS)
+#define SLAVE_LATENCY                    5
+// Connection supervisory timeout (2 seconds).
+#define CONN_SUP_TIMEOUT                 MSEC_TO_UNITS(2000, UNIT_10_MS)
 
 // Time from initiating event (connect or start of notification) to first time sd_ble_gap_conn_param_update is called (5 seconds).
 #define FIRST_CONN_PARAMS_UPDATE_DELAY   APP_TIMER_TICKS(5000, APP_TIMER_PRESCALER)     
@@ -408,7 +410,6 @@ static void handleBspEvent(bsp_event_t event)
 {
     uint32_t errorCode;
 
-    // UNDONE: Should be done through keyboard key presses now.
     switch (event)
     {
         case BSP_EVENT_SLEEP:
