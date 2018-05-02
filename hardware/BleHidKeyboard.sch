@@ -6409,11 +6409,11 @@ Source: http://www.osram.convergy.de/</description>
 <part name="SUPPLY4" library="SparkFun-Aesthetics" deviceset="VCC" device=""/>
 <part name="GND4" library="SparkFun-Aesthetics" deviceset="GND" device=""/>
 <part name="J4" library="adam_custom" deviceset="KEYBOARD_2X13" device=""/>
-<part name="R1" library="rcl" deviceset="R-US_" device="R0805" value="550"/>
+<part name="R1" library="rcl" deviceset="R-US_" device="R0805" value="1.2k"/>
 <part name="LED_NUM" library="adafruit" deviceset="LED" device="CHIPLED_1206" value="GREEN"/>
-<part name="R2" library="rcl" deviceset="R-US_" device="R0805" value="550"/>
+<part name="R2" library="rcl" deviceset="R-US_" device="R0805" value="1.2k"/>
 <part name="LED_CAPS" library="adafruit" deviceset="LED" device="CHIPLED_1206" value="GREEN"/>
-<part name="R3" library="rcl" deviceset="R-US_" device="R0805" value="550"/>
+<part name="R3" library="rcl" deviceset="R-US_" device="R0805" value="1.2k"/>
 <part name="LED_CONNECT" library="adafruit" deviceset="LED" device="CHIPLED_1206" value="GREEN"/>
 <part name="GND5" library="SparkFun-Aesthetics" deviceset="GND" device=""/>
 <part name="U$1" library="adam_custom" deviceset="CC-BY-SA-DOCFIELD" device=""/>
@@ -6426,7 +6426,7 @@ Source: http://www.osram.convergy.de/</description>
 <sheets>
 <sheet>
 <plain>
-<text x="233.68" y="10.16" size="2.54" layer="94">v1</text>
+<text x="233.68" y="10.16" size="2.54" layer="94">v2</text>
 </plain>
 <instances>
 <instance part="J1" gate="G$1" x="7.62" y="93.98"/>

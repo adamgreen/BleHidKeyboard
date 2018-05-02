@@ -1639,13 +1639,13 @@ Note, that not all DRC settings must be set by the manufacturer. Several can be 
 <element name="LED_CONNECT" library="adafruit" package="CHIPLED_1206" value="GREEN" x="97.79" y="23.495" locked="yes" smashed="yes" rot="R90">
 <attribute name="NAME" x="97.8408" y="21.9202" size="0.508" layer="25" font="vector" rot="R180" align="center"/>
 </element>
-<element name="R1" library="rcl" package="R0805" value="550" x="61.214" y="26.289" smashed="yes">
+<element name="R1" library="rcl" package="R0805" value="1.2k" x="61.214" y="26.289" smashed="yes">
 <attribute name="NAME" x="63.9318" y="26.3144" size="0.508" layer="25" font="vector" align="center"/>
 </element>
-<element name="R2" library="rcl" package="R0805" value="550" x="79.375" y="26.289" smashed="yes">
+<element name="R2" library="rcl" package="R0805" value="1.2k" x="79.375" y="26.289" smashed="yes">
 <attribute name="NAME" x="76.6318" y="26.289" size="0.508" layer="25" font="vector" align="center"/>
 </element>
-<element name="R3" library="rcl" package="R0805" value="550" x="98.552" y="26.289" smashed="yes">
+<element name="R3" library="rcl" package="R0805" value="1.2k" x="98.552" y="26.289" smashed="yes">
 <attribute name="NAME" x="95.4786" y="26.3398" size="0.6096" layer="25" font="vector" align="center"/>
 </element>
 <element name="U1" library="adam_custom" package="MOLEX_MINI_20POS" value="DYNASTREAM_N5150M5CD" x="55.88" y="7.747"/>
