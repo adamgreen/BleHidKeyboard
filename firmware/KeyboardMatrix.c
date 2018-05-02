@@ -89,7 +89,7 @@ uint32_t kbmatrixInit(KeyboardMatrix* pThis,
     errorCode = mcp23018SetGpioPullUps(&pThis->mcp23018_2, 0xFF, 0xFF);
     APP_ERROR_CHECK(errorCode);
 
-    // Run a keyboard scan pass to see if delete is pressed during startup.
+    // Check to see if Delete key is pressed during startup.
     *pIsDeletePressed = scanKeyboardForDeleteKey(pThis);
 
     // NOTE: APP_TIMER_TICKS results in 64-bit math.
@@ -117,8 +117,8 @@ static void scanKeyboardMatrixCallback(void* pContext)
     APP_ERROR_CHECK(errorCode);
 
     // Just skip this timer tick if the previous I/O hasn't completed yet and try again on the next one.
-    if (pThis->scanningStarted && (!mcp23018HasAsyncSetCompleted(&pThis->mcp23018_1) || 
-                                   !mcp23018HasAsyncSetCompleted(&pThis->mcp23018_2)))
+    if (pThis->scanningStarted && (!mcp23018HasAsyncGetCompleted(&pThis->mcp23018_1) ||
+                                   !mcp23018HasAsyncGetCompleted(&pThis->mcp23018_2)))
     {
         return;
     }
@@ -210,7 +210,6 @@ static void updateKeyboardInputReport(KeyboardMatrix* pThis, HidKeyboardUsageVal
     const size_t length = sizeof(pThis->reportCurr.keyArray);
     size_t i;
 
-    // UNDONE: Add special handling for FN key as necessary.
     if (key == HID_KEY_NOEVENT)
     {
         // Key doesn't have recognized HID code so just return.
@@ -289,7 +288,7 @@ static bool scanKeyboardForDeleteKey(KeyboardMatrix* pThis)
     APP_ERROR_CHECK(errorCode);
 
     // Wait for writes & reads to complete.
-    while (!mcp23018HasAsyncSetCompleted(&pThis->mcp23018_1) || !mcp23018HasAsyncSetCompleted(&pThis->mcp23018_2))
+    while (!mcp23018HasAsyncGetCompleted(&pThis->mcp23018_1) || !mcp23018HasAsyncGetCompleted(&pThis->mcp23018_2))
     {
     }
 
