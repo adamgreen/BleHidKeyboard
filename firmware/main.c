@@ -35,7 +35,6 @@
 #include <ble_dis.h>
 #include <ble_conn_params.h>
 #include <bsp.h>
-#include <sensorsim.h>
 #include <app_scheduler.h>
 #include <softdevice_handler_appsh.h>
 #include <app_timer_appsh.h>
@@ -45,6 +44,7 @@
 #include <app_trace.h>
 #include <nrf_drv_gpiote.h>
 #include <app_uart.h>
+#include <nrf_adc.h>
 #include "KeyboardMatrix.h"
 #include "MCP23018.h"
 #include "nrf_drv_timer.h"
@@ -79,7 +79,7 @@
 #define NUM_LOCK_PIN    24
 
 // Set to non-zero value to dump BLE HID reports.
-#define DEBUG_SHOW_HID_REPORT       1
+#define DEBUG_SHOW_HID_REPORT       0
 
 // Set to non-zero value if we want to remap keyboard to be special alphabetical order keyboard.
 #define KEYBOARD_IS_SPECIAL_ABC     1
@@ -117,9 +117,9 @@
 #define IS_SRVC_CHANGED_CHARACT_PRESENT  0                                              
 
 // Name of device. Will be included in the advertising data.
-#define DEVICE_NAME                      "Nordic_Keyboard"                              
+#define DEVICE_NAME                      "Pat's Keyboard"
 // Manufacturer. Will be passed to Device Information Service.
-#define MANUFACTURER_NAME                "NordicSemiconductor"
+#define MANUFACTURER_NAME                "PinkyDevelopment"
 // Product/Vendor IDs reported by Device Information Service.
 #define PNP_ID_VENDOR_ID_SOURCE          0x02
 #define PNP_ID_VENDOR_ID                 0x1915
@@ -130,12 +130,8 @@
 #define APP_TIMER_PRESCALER              0
 #define APP_TIMER_OP_QUEUE_SIZE          4
 
-// Update battery level measurement every 2000 milliseconds (2 seconds).
-#define BATTERY_LEVEL_MEAS_INTERVAL      APP_TIMER_TICKS(2000, APP_TIMER_PRESCALER)
-// Settings for battery simulation.
-#define MIN_BATTERY_LEVEL                81
-#define MAX_BATTERY_LEVEL                100
-#define BATTERY_LEVEL_INCREMENT          1
+// Update battery level measurement every minute.
+#define BATTERY_LEVEL_MEAS_INTERVAL      APP_TIMER_TICKS(60000, APP_TIMER_PRESCALER)
 
 // Fast advertising interval (in units of 0.625 ms. This value corresponds to 25 ms.).
 #define APP_ADV_FAST_INTERVAL            0x0028                                         
@@ -213,11 +209,6 @@ static uint16_t                     g_connHandle = BLE_CONN_HANDLE_INVALID;
 // Current protocol mode. Keyboard can run in standard HID mode or boot mode where it uses a fixed report format.
 static bool                         g_inBootMode = false;
 
-// Battery Level sensor simulator configuration.
-static sensorsim_cfg_t              g_batterySimConfig;
-// Battery Level sensor simulator state.
-static sensorsim_state_t            g_batterySimState;                           
-
 // Application identifier allocated by device manager.
 static dm_application_instance_t    g_appHandle;
 // Device reference handle to the current bonded central.
@@ -235,12 +226,12 @@ static void initUart(void);
 static void handleUartEvent(app_uart_evt_t* pEvent);
 static void initRtcTimers(void);
 static void handleBatteryLevelTimerEvent(void* pContext);
-static void updateBatteryLevel(void);
 static void keyboardTimerHandler(nrf_timer_event_t eventType, void* pvContext);
 static void initNumCapsLEDs();
 static void initBspLeds();
 static void handleBspEvent(bsp_event_t event);
 static void enterSleepMode(void);
+static void initBatteryLevelReads();
 static void initBleStack(void);
 static void handleBleEvent(ble_evt_t * pBleEvent);
 static void handleBleEventForApplication(ble_evt_t * pBleEvent);
@@ -262,7 +253,6 @@ static void handleHidEvent(ble_hids_t * p_hids, ble_hids_evt_t *p_evt);
 static void handleHidOutputReportWrite(ble_hids_evt_t *p_evt);
 static void updateKeyboardLeds(uint8_t hidLedBitmask);
 static void handleServiceError(uint32_t errorCode);
-static void initSensorSimulator(void);
 static void initConnectionParams(void);
 static void handleConnectionParamsError(uint32_t errorCode);
 static void startRtcTimers(void);
@@ -288,13 +278,13 @@ int main(void)
     APP_ERROR_CHECK(errorCode);
     initNumCapsLEDs();
     initBspLeds();
+    initBatteryLevelReads();
     initBleStack();
     initScheduler();
     initDeviceManager(eraseBonds);
     initGapParams();
     initAdvertising();
     initBleServices();
-    initSensorSimulator();
     initConnectionParams();
 
     printf("\nBleHidKeyboard starting...\n");
@@ -369,18 +359,15 @@ static void initRtcTimers(void)
 
 static void handleBatteryLevelTimerEvent(void* pContext)
 {
-    updateBatteryLevel();
-}
+    // If the last ADC sampling of Vcc is complete then update the battery level property.
+    if (!nrf_adc_conversion_finished())
+        return;
 
-static void updateBatteryLevel(void)
-{
-    uint32_t errorCode;
-    uint8_t  batteryLevel;
+    uint32_t vccReading = nrf_adc_result_get();
+    uint32_t batteryLevel = vccReading * 100 / 1024;
+    ASSERT ( batteryLevel <= 100 );
 
-    // UNDONE: Should sample actual battery voltage.
-    batteryLevel = (uint8_t)sensorsim_measure(&g_batterySimState, &g_batterySimConfig);
-
-    errorCode = ble_bas_battery_level_update(&g_bas, batteryLevel);
+    uint32_t errorCode = ble_bas_battery_level_update(&g_bas, batteryLevel);
     if ((errorCode != NRF_SUCCESS) &&
         (errorCode != NRF_ERROR_INVALID_STATE) &&
         (errorCode != BLE_ERROR_NO_TX_BUFFERS) &&
@@ -388,6 +375,9 @@ static void updateBatteryLevel(void)
     {
         APP_ERROR_HANDLER(errorCode);
     }
+
+    // Start the next ADC sample.
+    nrf_adc_start();
 }
 
 static void initNumCapsLEDs()
@@ -453,6 +443,20 @@ static void enterSleepMode(void)
     // Go to system-off mode (this function will not return; wakeup will cause a reset).
     errorCode = sd_power_system_off();
     APP_ERROR_CHECK(errorCode);
+}
+
+static void initBatteryLevelReads()
+{
+    const nrf_adc_config_t adcConfig = { .resolution = NRF_ADC_CONFIG_RES_10BIT,
+                                         .scaling = NRF_ADC_CONFIG_SCALING_SUPPLY_ONE_THIRD,
+                                         .reference = NRF_ADC_CONFIG_REF_VBG };
+
+    // Setup to sample 1/3Vcc and compare to 1.2V VBG.
+    nrf_adc_configure((nrf_adc_config_t *)&adcConfig);
+    nrf_adc_input_select(NRF_ADC_CONFIG_INPUT_DISABLED);
+
+    // Start the first ADC sample so that is likely to be ready when the timer expires.
+    nrf_adc_start();
 }
 
 static void initBleStack(void)
@@ -1026,17 +1030,6 @@ static void updateKeyboardLeds(uint8_t hidLedBitmask)
 static void handleServiceError(uint32_t errorCode)
 {
     APP_ERROR_HANDLER(errorCode);
-}
-
-// UNDONE: Shouldn't need this once we are really measuring the battery level.
-static void initSensorSimulator(void)
-{
-    g_batterySimConfig.min          = MIN_BATTERY_LEVEL;
-    g_batterySimConfig.max          = MAX_BATTERY_LEVEL;
-    g_batterySimConfig.incr         = BATTERY_LEVEL_INCREMENT;
-    g_batterySimConfig.start_at_max = true;
-
-    sensorsim_init(&g_batterySimState, &g_batterySimConfig);
 }
 
 static void initConnectionParams(void)

@@ -44,12 +44,12 @@ $(abspath $(NRF51_SDK_PATH)/components/libraries/trace/app_trace.c) \
 $(abspath $(NRF51_SDK_PATH)/components/libraries/util/nrf_assert.c) \
 $(abspath $(NRF51_SDK_PATH)/components/libraries/uart/retarget.c) \
 $(abspath $(NRF51_SDK_PATH)/components/libraries/pwm/app_pwm.c) \
-$(abspath $(NRF51_SDK_PATH)/components/libraries/sensorsim/sensorsim.c) \
 $(abspath $(NRF51_SDK_PATH)/components/libraries/uart/app_uart_fifo.c) \
 $(abspath $(NRF51_SDK_PATH)/components/drivers_nrf/delay/nrf_delay.c) \
 $(abspath $(NRF51_SDK_PATH)/components/drivers_nrf/common/nrf_drv_common.c) \
 $(abspath $(NRF51_SDK_PATH)/components/drivers_nrf/gpiote/nrf_drv_gpiote.c) \
 $(abspath $(NRF51_SDK_PATH)/components/drivers_nrf/uart/nrf_drv_uart.c) \
+$(abspath $(NRF51_SDK_PATH)/components/drivers_nrf/hal/nrf_adc.c) \
 $(abspath $(NRF51_SDK_PATH)/components/libraries/twi/app_twi.c) \
 $(abspath $(NRF51_SDK_PATH)/components/drivers_nrf/twi_master/nrf_drv_twi.c) \
 $(abspath $(NRF51_SDK_PATH)/components/drivers_nrf/ppi/nrf_drv_ppi.c) \
@@ -89,7 +89,6 @@ INC_PATHS += -I$(abspath $(NRF51_SDK_PATH)/components/ble/device_manager)
 INC_PATHS += -I$(abspath $(NRF51_SDK_PATH)/components/drivers_nrf/uart)
 INC_PATHS += -I$(abspath $(NRF51_SDK_PATH)/components/libraries/pwm)
 INC_PATHS += -I$(abspath $(NRF51_SDK_PATH)/components/ble/common)
-INC_PATHS += -I$(abspath $(NRF51_SDK_PATH)/components/libraries/sensorsim)
 INC_PATHS += -I$(abspath $(NRF51_SDK_PATH)/components/drivers_nrf/pstorage)
 INC_PATHS += -I$(abspath $(NRF51_SDK_PATH)/components/ble/ble_services/ble_dis)
 INC_PATHS += -I$(abspath $(NRF51_SDK_PATH)/components/device)
