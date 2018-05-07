@@ -26,3 +26,10 @@ I have only tested the build on macOS but it will probably work on other Posix o
 * ```make all``` will build the keyboard firmware.
 * ```make flash```will build the keyboard firmware and deploy it using the J-Link debugger.
 * ```make generate_patches``` can be used to generate diffs for any files that you have modified in the [config/ subfolder](https://github.com/adamgreen/BleHidKeyboard/tree/master/firmware/config) so that you can commit and share them via git.
+
+## Photos
+**Perixx PERIDUO-307B USB Wired Keyboard**<br>
+![Keyboard](https://raw.githubusercontent.com/adamgreen/BleHidKeyboard/master/images/20180507-01.jpg)<br>
+
+**Inside of Keyboard with Original PCB**<br>
+![Original PCB](https://raw.githubusercontent.com/adamgreen/BleHidKeyboard/master/images/20180507-02.jpg)<br>
