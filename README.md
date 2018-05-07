@@ -33,3 +33,6 @@ I have only tested the build on macOS but it will probably work on other Posix o
 
 **Inside of Keyboard with Original PCB**<br>
 ![Original PCB](https://raw.githubusercontent.com/adamgreen/BleHidKeyboard/master/images/20180507-02.jpg)<br>
+
+**Inside of Keyboard with Version 1 BLE PCB**<br>
+![Version 1 PCB](https://raw.githubusercontent.com/adamgreen/BleHidKeyboard/master/images/20180507-03.jpg)<br>
