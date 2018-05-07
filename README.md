@@ -1,6 +1,8 @@
 # BLE HID Keyboard
 A project to convert a [Perixx PERIDUO-307B USB wired keyboard](https://www.amazon.com/Perixx-PERIBOARD-407B-Mini-Keyboard-Dimension/dp/B0053O9ZNQ/) to wireless Bluetooth Low Energy (BLE). The conversion is accomplished by replacing the original PCB with the one documented here which uses a [Nordic nRF51422](https://www.nordicsemi.com/eng/Products/ANT/nRF51422) BLE capable ARM Cortex-M0 microcontroller. This repository includes the Eagle CAD PCB design files and firmware source code.
 
+<img src="https://raw.githubusercontent.com/adamgreen/BleHidKeyboard/master/images/20180506-PCB-Top.png" alt="OSHPark rendering of PCB Top" width="640" height="176" />
+
 ## Bill of Materials
 Description | Quantity | Part Number(s) 
 ------------|----------|---------------
@@ -11,6 +13,8 @@ Description | Quantity | Part Number(s)
 [Green SMT LED](https://www.digikey.com/product-detail/en/kingbright/APTD3216LCGCK/754-2049-1-ND/7043101) | 3 | LED_CAPS, LED_CONNECT, LED_NUM LED
 
 It also requires a 2x13 ribbon cable connector harvested from the original PCB using a [Chip Quick SMD Removal Kit](https://www.adafruit.com/product/2660).
+
+<a href="https://github.com/adamgreen/BleHidKeyboard/blob/master/hardware/BleHidKeyboard.pdf"><img src="https://raw.githubusercontent.com/adamgreen/BleHidKeyboard/master/hardware/BleHidKeyboard.png" alt="Schematic" /></a>
 
 ## Firmware Build
 I have only tested the build on macOS but it will probably work on other Posix operating systems too.
