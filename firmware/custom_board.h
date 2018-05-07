@@ -16,9 +16,9 @@
 // LEDs definitions for our custom board
 #define LEDS_NUMBER    1
 
-#define LED_START      9
-#define LED_1          9
-#define LED_STOP       9
+#define LED_START      30
+#define LED_1          30
+#define LED_STOP       30
 
 #define LEDS_LIST { LED_1 }
 

@@ -51,14 +51,14 @@
 
 
 // nRF51 pins connected to the I2C pins on the MCP23018 I/O expanders used with the keyboard matrix.
-#define KEYBOARD_SCL_PIN                15
+#define KEYBOARD_SCL_PIN                3
 #define KEYBOARD_SDA_PIN                5
 
 // The INTA & INTB pins for each of the MCP23018 devices.
-#define KEYBOARD_INTA1_PIN              3
-#define KEYBOARD_INTB1_PIN              8
-#define KEYBOARD_INTA2_PIN              11
-#define KEYBOARD_INTB2_PIN              21
+#define KEYBOARD_INTA1_PIN              8
+#define KEYBOARD_INTB1_PIN              11
+#define KEYBOARD_INTA2_PIN              9
+#define KEYBOARD_INTB2_PIN              6
 
 // There are two MCP23018 16-bit I/O expanders used to connect to all of the columns and rows of the keyboard matrix.
 // The following defines provide the I2C addresss of these two MCP23018 expanders.
@@ -66,7 +66,7 @@
 #define KEYBOARD_MCP23018_2_I2C_ADDRESS 0x27
 
 // Configuration options for the interrupt driven UART driver.
-#define UART_TX_PIN      6
+#define UART_TX_PIN      15
 #define UART_RX_PIN      12
 // CTS & RTS not actually used in this implementation.
 #define UART_CTS_PIN     0xFF
