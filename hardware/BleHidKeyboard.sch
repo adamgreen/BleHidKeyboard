@@ -1249,7 +1249,7 @@ package type SS</description>
 <text x="2.54" y="27.94" size="1.9304" layer="94">Attribution Share-Alike 4.0 License</text>
 <text x="2.54" y="24.13" size="1.9304" layer="94"> https://creativecommons.org/licenses/by-sa/4.0/</text>
 <text x="1.27" y="11.43" size="2.54" layer="94">Design by:</text>
-<text x="19.05" y="11.43" size="2.54" layer="94">&gt;DESIGNER</text>
+<text x="24.13" y="11.43" size="2.54" layer="94">&gt;DESIGNER</text>
 </symbol>
 <symbol name="PINH2X5">
 <wire x1="-6.35" y1="-7.62" x2="8.89" y2="-7.62" width="0.4064" layer="94"/>
@@ -6444,7 +6444,10 @@ Source: http://www.osram.convergy.de/</description>
 <instance part="LED_NUM" gate="G$1" x="119.38" y="38.1" rot="R90"/>
 <instance part="R2" gate="G$1" x="109.22" y="25.4"/>
 <instance part="LED_CAPS" gate="G$1" x="119.38" y="25.4" rot="R90"/>
-<instance part="R3" gate="G$1" x="109.22" y="12.7"/>
+<instance part="R3" gate="G$1" x="109.22" y="12.7" smashed="yes">
+<attribute name="NAME" x="102.362" y="13.4366" size="1.778" layer="95"/>
+<attribute name="VALUE" x="105.41" y="9.398" size="1.778" layer="96"/>
+</instance>
 <instance part="LED_CONNECT" gate="G$1" x="119.38" y="12.7" rot="R90"/>
 <instance part="GND5" gate="1" x="127" y="5.08"/>
 <instance part="U$1" gate="G$1" x="137.16" y="2.54"/>
