@@ -101,17 +101,6 @@
 #define INPUT_REPORT_KEYS_MAX_LEN        sizeof(HidKeyboardInputReport)
 
 
-// UNDONE: Need to update for new keyboard matrix code.
-// Configure keyboard type (QWERTY/ABC) macros based on previously defined macro settings.
-#if KEYBOARD_IS_SPECIAL_ABC
-    #define ALPHA_SCAN_CODES g_scanCodesABC
-    #define ALPHA_HID_CODES  g_scanCodesToHidABC
-#else
-    #define ALPHA_SCAN_CODES g_scanCodesQWERTY
-    #define ALPHA_HID_CODES  g_scanCodesToHidQWERTY
-#endif
-
-
 // Include or not the service_changed characteristic. 
 // If not enabled, the server's database cannot be changed for the lifetime of the device.
 #define IS_SRVC_CHANGED_CHARACT_PRESENT  0                                              
@@ -132,6 +121,9 @@
 
 // Update battery level measurement every minute.
 #define BATTERY_LEVEL_MEAS_INTERVAL      APP_TIMER_TICKS(60000, APP_TIMER_PRESCALER)
+
+// Turn NumLock LED off after 0.25 seconds when digit for pass key is pressed. Also used for debouncing these key presses.
+#define LED_BLINK_INTERVAL              APP_TIMER_TICKS(250, APP_TIMER_PRESCALER)
 
 // Fast advertising interval (in units of 0.625 ms. This value corresponds to 25 ms.).
 #define APP_ADV_FAST_INTERVAL            0x0028                                         
@@ -162,10 +154,10 @@
 
 // Perform bonding.
 #define SEC_PARAM_BOND                   1                                              
-// Man In The Middle protection not required.
-#define SEC_PARAM_MITM                   0
-// No I/O capabilities.
-#define SEC_PARAM_IO_CAPABILITIES        BLE_GAP_IO_CAPS_NONE
+// Man In The Middle protection IS required.
+#define SEC_PARAM_MITM                   1
+// This device is only capable of keyboard input (it has no display, etc).
+#define SEC_PARAM_IO_CAPABILITIES        BLE_GAP_IO_CAPS_KEYBOARD_ONLY
 // Out Of Band data not available.
 #define SEC_PARAM_OOB                    0
 // Minimum encryption key size.
@@ -198,7 +190,9 @@ typedef enum
 
 
 // Battery timer.
-APP_TIMER_DEF(g_batteryTimerId);                                                      
+APP_TIMER_DEF(g_batteryTimerId);
+// Timer for blinking NumLock LED when typing in pass key.
+APP_TIMER_DEF(g_blinkTimerId);
 
 // Structure used to identify the HID service.
 static ble_hids_t                   g_hids;
@@ -208,6 +202,12 @@ static ble_bas_t                    g_bas;
 static uint16_t                     g_connHandle = BLE_CONN_HANDLE_INVALID;       
 // Current protocol mode. Keyboard can run in standard HID mode or boot mode where it uses a fixed report format.
 static bool                         g_inBootMode = false;
+// Is the bonding process currently waiting for the pass key to be input and sent back to the central.
+static bool                         g_waitingForPassKey = false;
+// Buffer to be filled in with 6 digit pass key.
+static uint8_t                      g_passKeyBuffer[6];
+// Current index into g_passKeyBuffer.
+static uint8_t                      g_passKeyBufferIndex = 0;
 
 // Application identifier allocated by device manager.
 static dm_application_instance_t    g_appHandle;
@@ -227,6 +227,7 @@ static void handleUartEvent(app_uart_evt_t* pEvent);
 static void initRtcTimers(void);
 static void handleBatteryLevelTimerEvent(void* pContext);
 static void keyboardTimerHandler(nrf_timer_event_t eventType, void* pvContext);
+static void handleBlinkTimerEvent(void* pContext);
 static void initNumCapsLEDs();
 static void initBspLeds();
 static void handleBspEvent(bsp_event_t event);
@@ -355,6 +356,12 @@ static void initRtcTimers(void)
                                 APP_TIMER_MODE_REPEATED,
                                 handleBatteryLevelTimerEvent);
     APP_ERROR_CHECK(errorCode);
+
+    // Create NumLock LED blink timer (also used for pass key debouncing).
+    errorCode = app_timer_create(&g_blinkTimerId,
+                                APP_TIMER_MODE_SINGLE_SHOT,
+                                handleBlinkTimerEvent);
+    APP_ERROR_CHECK(errorCode);
 }
 
 static void handleBatteryLevelTimerEvent(void* pContext)
@@ -378,6 +385,20 @@ static void handleBatteryLevelTimerEvent(void* pContext)
 
     // Start the next ADC sample.
     nrf_adc_start();
+}
+
+static void handleBlinkTimerEvent(void* pContext)
+{
+    nrf_gpio_pin_clear(NUM_LOCK_PIN);
+
+    if (g_passKeyBufferIndex >= sizeof(g_passKeyBuffer))
+    {
+        // The blink for the sixth and final digit has just completed so send pass key back to the central.
+        g_passKeyBufferIndex = 0;
+        g_waitingForPassKey = false;
+        uint32_t errorCode = sd_ble_gap_auth_key_reply(g_connHandle, BLE_GAP_AUTH_KEY_TYPE_PASSKEY, g_passKeyBuffer);
+        APP_ERROR_CHECK(errorCode);
+    }
 }
 
 static void initNumCapsLEDs()
@@ -511,6 +532,7 @@ static void handleBleEventForApplication(ble_evt_t * pBleEvent)
 
         case BLE_GAP_EVT_DISCONNECTED:
             g_connHandle = BLE_CONN_HANDLE_INVALID;
+            g_waitingForPassKey = false;
             break;
 
         case BLE_EVT_USER_MEM_REQUEST:
@@ -547,6 +569,17 @@ static void handleBleEventForApplication(ble_evt_t * pBleEvent)
             APP_ERROR_CHECK(errorCode);
             break;
 
+        case BLE_GAP_EVT_AUTH_KEY_REQUEST:
+            if (pBleEvent->evt.gap_evt.params.auth_key_request.key_type == BLE_GAP_AUTH_KEY_TYPE_PASSKEY)
+            {
+                // Need user to type in the 6 digit pass key being displayed on the central.
+                memset(g_passKeyBuffer, '0', sizeof(g_passKeyBuffer));
+                g_passKeyBufferIndex = 0;
+                nrf_gpio_pin_clear(NUM_LOCK_PIN);
+                g_waitingForPassKey = true;
+            }
+            break;
+            
         default:
             // No implementation needed.
             break;
@@ -786,11 +819,11 @@ static void initBatteryService(void)
     basInitObject.p_report_ref         = NULL;
     basInitObject.initial_batt_level   = 100;
 
-    BLE_GAP_CONN_SEC_MODE_SET_ENC_NO_MITM(&basInitObject.battery_level_char_attr_md.cccd_write_perm);
-    BLE_GAP_CONN_SEC_MODE_SET_ENC_NO_MITM(&basInitObject.battery_level_char_attr_md.read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_ENC_WITH_MITM(&basInitObject.battery_level_char_attr_md.cccd_write_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_ENC_WITH_MITM(&basInitObject.battery_level_char_attr_md.read_perm);
     BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&basInitObject.battery_level_char_attr_md.write_perm);
 
-    BLE_GAP_CONN_SEC_MODE_SET_ENC_NO_MITM(&basInitObject.battery_level_report_read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_ENC_WITH_MITM(&basInitObject.battery_level_report_read_perm);
 
     errorCode = ble_bas_init(&g_bas, &basInitObject);
     APP_ERROR_CHECK(errorCode);
@@ -862,17 +895,17 @@ static void initHidServiceForKeyboard(void)
     pInputReport->rep_ref.report_id   = INPUT_REP_REF_ID;
     pInputReport->rep_ref.report_type = BLE_HIDS_REP_TYPE_INPUT;
 
-    BLE_GAP_CONN_SEC_MODE_SET_ENC_NO_MITM(&pInputReport->security_mode.cccd_write_perm);
-    BLE_GAP_CONN_SEC_MODE_SET_ENC_NO_MITM(&pInputReport->security_mode.read_perm);
-    BLE_GAP_CONN_SEC_MODE_SET_ENC_NO_MITM(&pInputReport->security_mode.write_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_ENC_WITH_MITM(&pInputReport->security_mode.cccd_write_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_ENC_WITH_MITM(&pInputReport->security_mode.read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_ENC_WITH_MITM(&pInputReport->security_mode.write_perm);
 
     pOutputReport                      = &outputReportArray[OUTPUT_REPORT_INDEX];
     pOutputReport->max_len             = OUTPUT_REPORT_MAX_LEN;
     pOutputReport->rep_ref.report_id   = OUTPUT_REP_REF_ID;
     pOutputReport->rep_ref.report_type = BLE_HIDS_REP_TYPE_OUTPUT;
 
-    BLE_GAP_CONN_SEC_MODE_SET_ENC_NO_MITM(&pOutputReport->security_mode.read_perm);
-    BLE_GAP_CONN_SEC_MODE_SET_ENC_NO_MITM(&pOutputReport->security_mode.write_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_ENC_WITH_MITM(&pOutputReport->security_mode.read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_ENC_WITH_MITM(&pOutputReport->security_mode.write_perm);
 
     hidInfoFlags = HID_INFO_FLAG_REMOTE_WAKE_MSK | HID_INFO_FLAG_NORMALLY_CONNECTABLE_MSK;
 
@@ -896,22 +929,22 @@ static void initHidServiceForKeyboard(void)
     hidsInitObject.included_services_count        = 0;
     hidsInitObject.p_included_services_array      = NULL;
 
-    BLE_GAP_CONN_SEC_MODE_SET_ENC_NO_MITM(&hidsInitObject.rep_map.security_mode.read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_ENC_WITH_MITM(&hidsInitObject.rep_map.security_mode.read_perm);
     BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&hidsInitObject.rep_map.security_mode.write_perm);
-    BLE_GAP_CONN_SEC_MODE_SET_ENC_NO_MITM(&hidsInitObject.hid_information.security_mode.read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_ENC_WITH_MITM(&hidsInitObject.hid_information.security_mode.read_perm);
     BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&hidsInitObject.hid_information.security_mode.write_perm);
 
-    BLE_GAP_CONN_SEC_MODE_SET_ENC_NO_MITM(
+    BLE_GAP_CONN_SEC_MODE_SET_ENC_WITH_MITM(
         &hidsInitObject.security_mode_boot_kb_inp_rep.cccd_write_perm);
-    BLE_GAP_CONN_SEC_MODE_SET_ENC_NO_MITM(&hidsInitObject.security_mode_boot_kb_inp_rep.read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_ENC_WITH_MITM(&hidsInitObject.security_mode_boot_kb_inp_rep.read_perm);
     BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&hidsInitObject.security_mode_boot_kb_inp_rep.write_perm);
-    BLE_GAP_CONN_SEC_MODE_SET_ENC_NO_MITM(&hidsInitObject.security_mode_boot_kb_outp_rep.read_perm);
-    BLE_GAP_CONN_SEC_MODE_SET_ENC_NO_MITM(&hidsInitObject.security_mode_boot_kb_outp_rep.write_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_ENC_WITH_MITM(&hidsInitObject.security_mode_boot_kb_outp_rep.read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_ENC_WITH_MITM(&hidsInitObject.security_mode_boot_kb_outp_rep.write_perm);
 
-    BLE_GAP_CONN_SEC_MODE_SET_ENC_NO_MITM(&hidsInitObject.security_mode_protocol.read_perm);
-    BLE_GAP_CONN_SEC_MODE_SET_ENC_NO_MITM(&hidsInitObject.security_mode_protocol.write_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_ENC_WITH_MITM(&hidsInitObject.security_mode_protocol.read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_ENC_WITH_MITM(&hidsInitObject.security_mode_protocol.write_perm);
     BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&hidsInitObject.security_mode_ctrl_point.read_perm);
-    BLE_GAP_CONN_SEC_MODE_SET_ENC_NO_MITM(&hidsInitObject.security_mode_ctrl_point.write_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_ENC_WITH_MITM(&hidsInitObject.security_mode_ctrl_point.write_perm);
 
     errorCode = ble_hids_init(&g_hids, &hidsInitObject);
     APP_ERROR_CHECK(errorCode);
@@ -943,10 +976,7 @@ static void handleHidEvent(ble_hids_t * p_hids, ble_hids_evt_t *p_evt)
             if (g_inBootMode)
             {
                 // Protocol mode is Boot Protocol mode.
-                if (
-                    p_evt->params.notification.char_id.uuid
-                    ==
-                    BLE_UUID_BOOT_KEYBOARD_INPUT_REPORT_CHAR
+                if (p_evt->params.notification.char_id.uuid == BLE_UUID_BOOT_KEYBOARD_INPUT_REPORT_CHAR
                 )
                 {
                     // The notification of boot keyboard input report has been enabled.
@@ -1067,7 +1097,8 @@ static void startRtcTimers(void)
 
 static void sendInputReportHandler(HidKeyboardInputReport* pReportToSend, void* pvContext, bool sleepPressed)
 {
-    uint32_t errorCode;
+    static uint8_t lastDigit = '\0';
+    uint32_t       errorCode;
 
     if (sleepPressed)
     {
@@ -1093,6 +1124,52 @@ static void sendInputReportHandler(HidKeyboardInputReport* pReportToSend, void* 
         return;
     }
 
+    // First check to see if the central is waiting for user to type in 6 digit pass key instead of waiting for latest
+    // key state.
+    if (g_waitingForPassKey)
+    {
+        // Is there currently a number key pressed?
+        uint8_t currDigit = '\0';
+        for (size_t i = 0 ; i < sizeof(pReportToSend->keyArray) ; i++)
+        {
+            HidKeyboardUsageValues key = pReportToSend->keyArray[i];
+            if (key >= HID_KEY_1 && key <= HID_KEY_9)
+            {
+                currDigit = key - HID_KEY_1 + '1';
+                break;
+            }
+            else if (key == HID_KEY_0)
+            {
+                currDigit = '0';
+                break;
+            }
+        }
+
+        if (currDigit == lastDigit)
+        {
+            // Nothing has changed so nothing more to do at this time.
+            return;
+        }
+        if (currDigit != '\0' && nrf_gpio_pin_read(NUM_LOCK_PIN) == 0)
+        {
+            // A new key has been pressed and the NumLock blink from the last press is no longer lit so 
+            // add this key to the pass key buffer.
+            ASSERT ( g_passKeyBufferIndex < sizeof(g_passKeyBuffer) );
+            g_passKeyBuffer[g_passKeyBufferIndex++] = currDigit;
+
+            // Blink the NumLock LED to show user that the key was pressed.
+            // The pass key will be sent to the central when the blink timer for the sixth digit completes.
+            nrf_gpio_pin_set(NUM_LOCK_PIN);
+            errorCode = app_timer_start(g_blinkTimerId, LED_BLINK_INTERVAL, NULL);
+            APP_ERROR_CHECK(errorCode);
+        }
+
+        // Remember the current digit key state.
+        lastDigit = currDigit;
+
+        return;
+    }
+    
     if (!g_inBootMode)
     {
         errorCode = ble_hids_inp_rep_send(&g_hids,
