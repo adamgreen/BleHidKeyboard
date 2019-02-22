@@ -4,8 +4,10 @@ A project to convert a [Perixx PERIDUO-307B USB wired keyboard](https://www.amaz
 <img src="https://raw.githubusercontent.com/adamgreen/BleHidKeyboard/master/images/20180506-PCB-Top.png" alt="OSHPark rendering of PCB Top" width="640" height="176" />
 
 ## Bill of Materials
-Description | Quantity | Part Number(s) 
+Description | Quantity | Part Number(s)
 ------------|----------|---------------
+[Perixx PERIDUO-307B USB wired keyboard](https://www.amazon.com/Perixx-PERIBOARD-407B-Mini-Keyboard-Dimension/dp/B0053O9ZNQ/) | 1 |
+[SODIAL 3W LED Mini Pen Torch Flashlight 2xAAA](https://www.amazon.com/gp/product/B01J58ZHOG) | 1 |
 [1.2kΩ Resistor - 0805](https://www.adafruit.com/product/441) | 3 | R1, R2, R3
 [Microchip MCP23018 I2C I/O Expander](https://www.digikey.com/product-detail/en/microchip-technology/MCP23018-E-SS/MCP23018-E-SS-ND/1999506) | 2 | IC1, IC2
 [Samtec 2x5 SMT Micro Header](https://www.digikey.com/product-detail/en/FTSH-105-01-L-DV-K/SAM8799-ND/1875039) | 1 | JP1
@@ -34,5 +36,14 @@ I have only tested the build on macOS but it will probably work on other Posix o
 **Inside of Keyboard with Original PCB**<br>
 ![Original PCB](https://raw.githubusercontent.com/adamgreen/BleHidKeyboard/master/images/20180507-02.jpg)<br>
 
-**Inside of Keyboard with Version 1 BLE PCB**<br>
-![Version 1 PCB](https://raw.githubusercontent.com/adamgreen/BleHidKeyboard/master/images/20180507-03.jpg)<br>
+**Inside of Keyboard with New BLE PCB**<br>
+![New PCB From Top](https://github.com/adamgreen/BleHidKeyboard/raw/master/images/20190222-01.jpg)<br>
+
+**Peeking Under Membrane at New BLE PCB**<br>
+![New PCB Looking Under Membrane](https://github.com/adamgreen/BleHidKeyboard/raw/master/images/20190222-02.jpg)<br>
+
+**Inside of Keyboard After Modifications**<br>
+![Inside of Keyboard](https://github.com/adamgreen/BleHidKeyboard/raw/master/images/20190222-03.jpg)<br>
+
+**Keyboard with 2xAAA Torchlight as Battery Pack**<br>
+![Full Keyboard](https://github.com/adamgreen/BleHidKeyboard/raw/master/images/20190222-04.jpg)<br>
